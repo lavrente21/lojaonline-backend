@@ -1,0 +1,92 @@
+{
+  "produtos": [
+    {
+      "id": "prod_001",
+      "nome": "Sérum de vitamina C 20%",
+      "categoria": "Skincare",
+      "precoVendaEUR": 32.9,
+      "precoCustoEUR": 14.2,
+      "fornecedor": "cj",
+      "idFornecedor": "CJ-8823741",
+      "stock": 48
+    },
+    {
+      "id": "prod_002",
+      "nome": "Máscara capilar reparadora",
+      "categoria": "Hair care",
+      "precoVendaEUR": 24.5,
+      "precoCustoEUR": 9.8,
+      "fornecedor": "buckydrop",
+      "idFornecedor": "BKY-55210",
+      "stock": 32
+    }
+  ],
+  "pedidos": [
+    {
+      "id": "LUM-48214",
+      "clienteId": null,
+      "itens": [
+        {
+          "produtoId": "prod_001",
+          "nome": "Sérum de vitamina C 20%",
+          "fornecedor": "cj",
+          "quantidade": 2,
+          "precoUnitarioEUR": 32.9
+        }
+      ],
+      "totalEUR": 65.8,
+      "moeda": "AOA",
+      "cambio": {
+        "taxaUsada": 1100,
+        "valorEUR": 65.8,
+        "valorAOA": 72380,
+        "dataCambio": "2026-09-12T09:42:42.549Z"
+      },
+      "moradaEntregaFinal": {
+        "linha1": "Rua X",
+        "cidade": "Luanda",
+        "codigoPostal": "",
+        "pais": "AO"
+      },
+      "rotaEnvio": "agente_de_carga",
+      "moradaEnviadaAoFornecedor": {
+        "nome": "Agente de Carga — a preencher",
+        "linha1": "Morada do armazém do agente (a confirmar)",
+        "cidade": "A confirmar",
+        "codigoPostal": "000000",
+        "pais": "A confirmar",
+        "telefone": "+000000000",
+        "referenciaInterna": "LUMINA-CONSOLIDACAO"
+      },
+      "estado": "processando",
+      "pagamento": {
+        "metodo": "appypay",
+        "idCobranca": "APPY-452933",
+        "estado": "pago",
+        "idCobrancaConfirmada": "APPY-TEST"
+      },
+      "fornecedores": {
+        "cj": {
+          "idPedidoFornecedor": "CJ-847024",
+          "prazoEstimadoDias": "8-14",
+          "rastreio1": "TESTE123",
+          "rastreio2": null,
+          "estado": "enviado_ao_agente"
+        }
+      },
+      "criadoEm": "2026-09-12T09:42:42.549Z"
+    }
+  ],
+  "clientes": [],
+  "admins": [
+    {
+      "id": "admin_001",
+      "nome": "Ana Ribeiro",
+      "email": "ana@lumina-beauty.com",
+      "passwordHash": "$2b$10$c7NKso1Cds84oAbZunaXh.IrvYq84w59B4GTigTrFD56OgWbQKiNy"
+    }
+  ],
+  "contadores": {
+    "pedido": 48213
+  }
+}
