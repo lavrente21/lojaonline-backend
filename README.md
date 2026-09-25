@@ -32,6 +32,18 @@ A API fica em `http://localhost:3000`.
 - Autenticação com JWT (cliente e admin, rotas separadas e protegidas)
 - CORS já preparado para loja e admin em domínios/subdomínios diferentes
 
+## Importar produtos da CJ Dropshipping
+
+No admin, em **Produtos → Novo produto**, cola o ID ou o link do produto na
+CJ e clica em "Buscar produto na CJ": nome, categoria, preço de custo
+(convertido de USD para EUR), imagem e descrição são pré-preenchidos —
+revê o preço de venda e o stock antes de gravar.
+
+Por trás, isto chama `GET /api/produtos/importar/cj?id=...` (rota admin),
+que usa `integrations/cj-api.js` → `buscarProdutoPorId()`. Requer
+`CJ_API_KEY` no `.env` (ver `.env.example`); sem ela, o pedido falha com
+uma mensagem clara em vez de tentar simular dados falsos de produto.
+
 ## O que está em modo SIMULADO (mock) — a ligar antes de ir para produção
 
 Todos os ficheiros em `/integrations` têm comentários `TODO produção` a indicar
@@ -39,7 +51,7 @@ exatamente onde substituir pela chamada real:
 
 | Ficheiro | O que falta |
 |---|---|
-| `integrations/cj-api.js` | Chave real do CJ + endpoints reais da API v2.0 |
+| `integrations/cj-api.js` | **Importação de produtos já usa a API real da CJ** (`GET /product/query`, autenticação por `CJ_API_KEY`). Falta ainda ligar `criarPedido()`, `consultarEstoque()` e `consultarRastreio()` aos endpoints reais (ver `TODO produção` no ficheiro) |
 | `integrations/buckydrop-api.js` | Chave real + confirmar endpoints com o suporte do Buckydrop |
 | `integrations/appypay.js` | Ligar à sua API do AppyPay já pronta |
 | `integrations/pagamentos-eur.js` | Chave real do Stripe/PayPal |

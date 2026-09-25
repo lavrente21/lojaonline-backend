@@ -6,10 +6,18 @@
 // cache de alguns minutos para não pedir a taxa em cada checkout.
 
 const TAXA_EXEMPLO_AOA_POR_EUR = 1100; // 1 EUR ≈ 1100 AOA (AJUSTAR com taxa real)
+const TAXA_EXEMPLO_EUR_POR_USD = 0.92; // 1 USD ≈ 0.92 EUR (AJUSTAR com taxa real)
 
 async function obterTaxaAtual() {
   // TODO produção: chamar fonte de câmbio real aqui.
   return TAXA_EXEMPLO_AOA_POR_EUR;
+}
+
+// Usado para converter preços de fornecedores que vêm em USD (ex: CJ Dropshipping)
+// para EUR, ao importar um produto. Mesma nota do TODO acima: trocar por uma
+// fonte de câmbio real antes de produção.
+async function converterUSDparaEUR(valorUSD) {
+  return Math.round(valorUSD * TAXA_EXEMPLO_EUR_POR_USD * 100) / 100;
 }
 
 async function converterEURparaAOA(valorEUR) {
@@ -28,4 +36,4 @@ async function travarCambioParaPedido(valorEUR) {
   };
 }
 
-module.exports = { obterTaxaAtual, converterEURparaAOA, travarCambioParaPedido };
+module.exports = { obterTaxaAtual, converterEURparaAOA, converterUSDparaEUR, travarCambioParaPedido };
