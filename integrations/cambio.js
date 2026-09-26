@@ -1,61 +1,18 @@
-// Módulo de câmbio — AGORA REAL.
-//
-// Fonte: open.er-api.com (ExchangeRate-API, ponto de acesso aberto, sem
-// necessidade de chave, atualizado uma vez por dia). Se quiseres uma fonte
-// com atualizações mais frequentes (ex: de hora a hora), troca por um plano
-// pago do mesmo fornecedor (https://www.exchangerate-api.com) e define
-// EXCHANGE_API_KEY no .env — o código abaixo já usa essa chave se existir.
-//
-// Se a chamada falhar (sem internet, fornecedor em baixo, etc.), cai para
-// uma taxa fixa de segurança (TAXA_RESERVA) para o checkout nunca partir.
+const DEFAULT_CURRENCIES=['EUR','USD','GBP','CHF','CAD','BRL','MXN','CLP','COP','PLN','SEK','DKK','NOK','CZK','RON','ZAR','AOA'];
+const FX_BASE='https://api.frankfurter.dev/v2';
 
-const TAXA_RESERVA_AOA_POR_EUR = Number(process.env.TAXA_RESERVA_AOA_POR_EUR || 1100);
-const CACHE_MS = 10 * 60 * 1000; // 10 minutos — evita pedir a taxa em todos os checkouts
-
-let cache = { taxa: null, expiraEm: 0 };
-
-async function obterTaxaAtual() {
-  if (cache.taxa && Date.now() < cache.expiraEm) {
-    return cache.taxa;
-  }
-
-  const url = process.env.EXCHANGE_API_KEY
-    ? `https://v6.exchangerate-api.com/v6/${process.env.EXCHANGE_API_KEY}/latest/EUR`
-    : 'https://open.er-api.com/v6/latest/EUR';
-
-  try {
-    const resposta = await fetch(url);
-    if (!resposta.ok) throw new Error(`HTTP ${resposta.status}`);
-    const dados = await resposta.json();
-
-    const taxa = process.env.EXCHANGE_API_KEY
-      ? dados.conversion_rates && dados.conversion_rates.AOA
-      : dados.rates && dados.rates.AOA;
-
-    if (!taxa) throw new Error('A resposta não trouxe a taxa AOA.');
-
-    cache = { taxa, expiraEm: Date.now() + CACHE_MS };
-    return taxa;
-  } catch (erro) {
-    console.error('[Câmbio] Falha ao obter taxa real, a usar taxa de reserva:', erro.message);
-    return TAXA_RESERVA_AOA_POR_EUR;
-  }
+async function fetchJson(url){const r=await fetch(url,{headers:{Accept:'application/json'}});if(!r.ok)throw new Error(`Fonte de câmbio respondeu ${r.status}.`);return r.json();}
+async function obterTaxasEUR(currencies=DEFAULT_CURRENCIES){
+ const normal=currencies.filter(c=>c!=='EUR'&&c!=='AOA');
+ const rates={EUR:1};
+ if(normal.length){const d=await fetchJson(`${FX_BASE}/rates?base=EUR&quotes=${encodeURIComponent(normal.join(','))}`);Object.assign(rates,d.rates||{});}
+ // AOA: referência do Banco Nacional de Angola, através do provedor BNA do Frankfurter.
+ const aoa=await fetchJson(`${FX_BASE}/rate/EUR/AOA?providers=BNA`); if(Number.isFinite(Number(aoa.rate)))rates.AOA=Number(aoa.rate);
+ for(const c of currencies)if(!Number.isFinite(Number(rates[c]))||Number(rates[c])<=0)throw new Error(`Não existe cotação real disponível para ${c}.`);
+ return rates;
 }
-
-async function converterEURparaAOA(valorEUR) {
-  const taxa = await obterTaxaAtual();
-  return Math.round(valorEUR * taxa * 100) / 100;
-}
-
-// Trava a taxa usada no pedido — guardada no próprio pedido para nunca mudar depois.
-async function travarCambioParaPedido(valorEUR) {
-  const taxa = await obterTaxaAtual();
-  return {
-    taxaUsada: taxa,
-    valorEUR,
-    valorAOA: Math.round(valorEUR * taxa * 100) / 100,
-    dataCambio: new Date().toISOString()
-  };
-}
-
-module.exports = { obterTaxaAtual, converterEURparaAOA, travarCambioParaPedido };
+async function obterTaxaAtual(){return (await obterTaxasEUR(['EUR','AOA'])).AOA;}
+async function converterEUR(valorEUR,moeda){const rates=await obterTaxasEUR(['EUR',moeda]);return {taxa:Number(rates[moeda]),valor:Number((Number(valorEUR)*Number(rates[moeda])).toFixed(2)),data:new Date().toISOString()};}
+async function travarCambioParaPedido(valorEUR){const x=await converterEUR(valorEUR,'AOA');return{taxaUsada:x.taxa,valorEUR:Number(valorEUR),valorAOA:x.valor,dataCambio:x.data};}
+async function obterTaxaUsdEur(){const rates=await obterTaxasEUR(['EUR','USD']);return 1/Number(rates.USD);}
+module.exports={DEFAULT_CURRENCIES,obterTaxasEUR,converterEUR,obterTaxaAtual,travarCambioParaPedido,obterTaxaUsdEur};
