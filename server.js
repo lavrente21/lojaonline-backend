@@ -15,7 +15,7 @@ const corsOptions={
     return cb(null,false);
   },
   methods:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders:['Content-Type','Authorization','Accept','X-Requested-With'],
+  allowedHeaders:['Content-Type','Authorization','Accept','X-Requested-With','Cache-Control','Pragma'],
   credentials:false,
   optionsSuccessStatus:204
 };
