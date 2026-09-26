@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const { query } = require('../config/db');
-const { gerarToken } = require('../middleware/auth');
+const { gerarToken, exigirAutenticacao } = require('../middleware/auth');
 const router = express.Router();
 const normalizar = e => String(e || '').trim().toLowerCase();
 
