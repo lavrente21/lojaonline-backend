@@ -120,6 +120,7 @@ CREATE TABLE produto_variantes (
   nome_opcao        VARCHAR(60) NOT NULL,      -- ex: "Tamanho", "Cor"
   valor_opcao       VARCHAR(120) NOT NULL,     -- ex: "30ml", "Rosa"
   sku_variante      VARCHAR(120),              -- SKU da variante no fornecedor
+  id_fornecedor_variante VARCHAR(120),          -- Variant ID/VID real do fornecedor
   preco_extra_eur   NUMERIC(10,2) NOT NULL DEFAULT 0,  -- soma ao preco_venda_eur do produto
   stock             INTEGER NOT NULL DEFAULT 0 CHECK (stock >= 0),
   imagem_url        TEXT,
@@ -192,9 +193,12 @@ CREATE TABLE pedidos (
   cliente_id                  BIGINT REFERENCES clientes(id) ON DELETE SET NULL,
 
   total_eur                   NUMERIC(10,2) NOT NULL CHECK (total_eur >= 0),
-  moeda                       VARCHAR(3) NOT NULL CHECK (moeda IN ('EUR', 'AOA')),
+  frete_usd              NUMERIC(10,2),
+  frete_eur              NUMERIC(10,2),
+  metodo_envio           VARCHAR(120),
+  moeda                       VARCHAR(3) NOT NULL CHECK (moeda IN ('EUR','USD','GBP','CHF','CAD','BRL','MXN','CLP','COP','PLN','SEK','DKK','NOK','CZK','RON','ZAR','AOA')),
 
-  -- Câmbio travado no momento da compra (só preenchido se moeda = AOA)
+  -- Câmbio travado no momento da compra
   cambio_taxa_usada           NUMERIC(12,4),
   cambio_valor_eur            NUMERIC(10,2),
   cambio_valor_aoa            NUMERIC(14,2),
@@ -247,6 +251,7 @@ CREATE TABLE pedido_itens (
   nome_produto        VARCHAR(255) NOT NULL,   -- snapshot: nome no momento da compra
   fornecedor          VARCHAR(20) NOT NULL,    -- snapshot: 'cj' | 'buckydrop' | 'proprio'
   quantidade          INTEGER NOT NULL CHECK (quantidade > 0),
+  id_fornecedor_variante VARCHAR(120),
   preco_unitario_eur  NUMERIC(10,2) NOT NULL CHECK (preco_unitario_eur >= 0)
 );
 

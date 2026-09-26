@@ -1,4 +1,4 @@
-const paisesDiretos=(process.env.PAISES_COM_ENVIO_DIRETO||'PT,ES,FR,DE,IT,NL,BE,US,GB,IE').split(',').map(x=>x.trim().toUpperCase()).filter(Boolean);
+const paisesDiretos=(process.env.PAISES_COM_ENVIO_DIRETO||'PT,ES,FR,DE,IT,NL,BE,AT,IE,SE,DK,FI,PL,CZ,RO,GB,US,CA,MX,BR,CL,AR,CO').split(',').map(x=>x.trim().toUpperCase()).filter(Boolean);
 function precisaDeAgenteDeCarga(p){return !paisesDiretos.includes(String(p).toUpperCase())}
 function resolverMoradaParaFornecedor(pais,m){
  if(!precisaDeAgenteDeCarga(pais)) return {tipo:'direto',morada:m};

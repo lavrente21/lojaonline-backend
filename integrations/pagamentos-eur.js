@@ -1,8 +1,5 @@
 const Stripe=require('stripe');
 let stripe;
-function client(){ if(!process.env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY não configurada.'); return stripe ||= new Stripe(process.env.STRIPE_SECRET_KEY); }
-async function criarSessaoStripe({pedidoId,valorEUR,email}){
- const s=await client().checkout.sessions.create({mode:'payment',currency:'eur',line_items:[{price_data:{currency:'eur',product_data:{name:`Encomenda ${pedidoId}`},unit_amount:Math.round(valorEUR*100)},quantity:1}],customer_email:email||undefined,client_reference_id:String(pedidoId),metadata:{pedidoId:String(pedidoId)},success_url:`${process.env.FRONTEND_URL}/confirmacao.html?numero=${encodeURIComponent(pedidoId)}&pagamento=processado`,cancel_url:`${process.env.FRONTEND_URL}/checkout.html?cancelado=1`});
- return {idCobranca:s.id,urlCheckout:s.url};
-}
+function client(){if(!process.env.STRIPE_SECRET_KEY)throw new Error('STRIPE_SECRET_KEY não configurada.');return stripe ||= new Stripe(process.env.STRIPE_SECRET_KEY);}
+async function criarSessaoStripe({pedidoId,valor,moeda,email}){const c=String(moeda).toLowerCase();const amount=['CLP','COP'].includes(String(moeda).toUpperCase())?Math.round(Number(valor)):Math.round(Number(valor)*100);if(!Number.isInteger(amount)||amount<=0)throw new Error('Valor de pagamento inválido.');const s=await client().checkout.sessions.create({mode:'payment',currency:c,line_items:[{price_data:{currency:c,product_data:{name:`Encomenda ${pedidoId}`},unit_amount:amount},quantity:1}],customer_email:email||undefined,client_reference_id:String(pedidoId),metadata:{pedidoId:String(pedidoId),currency:String(moeda)},success_url:`${process.env.FRONTEND_URL}/confirmacao.html?numero=${encodeURIComponent(pedidoId)}&pagamento=processado`,cancel_url:`${process.env.FRONTEND_URL}/checkout.html?cancelado=1`});return{idCobranca:s.id,urlCheckout:s.url};}
 module.exports={criarSessaoStripe,client};

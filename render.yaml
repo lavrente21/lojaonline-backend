@@ -43,6 +43,8 @@ services:
         sync: false
       - key: EXCHANGE_RATE_API_KEY
         sync: false
+      - key: EXCHANGE_RATE_USD_EUR_URL
+        value: https://api.frankfurter.app/latest?from=USD&to=EUR
       - key: AGENTE_NOME
         sync: false
       - key: AGENTE_LINHA1
