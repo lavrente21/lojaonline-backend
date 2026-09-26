@@ -14,13 +14,17 @@ router.get('/:id/fretes',async(req,res,next)=>{try{
  const produto=(await query('SELECT id,fornecedor,id_fornecedor,peso_gramas,atributos_cj FROM produtos WHERE id=$1 AND ativo=true',[req.params.id])).rows[0];
  if(!produto)return res.status(404).json({erro:'Produto não encontrado.'});
  const pais=String(req.query.pais||'').toUpperCase(); if(!/^[A-Z]{2}$/.test(pais))return res.status(400).json({erro:'País de destino inválido.'});
- const quantidade=Math.max(1,Number(req.query.quantidade||1)); const varianteId=Number(req.query.varianteId||0);
- if(produto.fornecedor!=='cj')return res.json({origem:'fornecedor',disponivel:false,metodos:[],mensagem:'Cálculo de frete deste fornecedor ainda não está disponível.'});
+ const quantidade=Math.max(1,Number(req.query.quantidade||1)); const varianteId=Number(req.query.varianteId||0); const moeda=String(req.query.moeda||'EUR').toUpperCase();
+ const {DEFAULT_CURRENCIES,obterTaxasEUR}=require('../integrations/cambio');
+ if(!DEFAULT_CURRENCIES.includes(moeda))return res.status(400).json({erro:'Moeda não suportada.'});
+ if(produto.fornecedor!=='cj')return res.json({origem:'fornecedor',disponivel:false,metodos:[],mensagem:'Este produto não tem cálculo de entrega disponível para este fornecedor.'});
  const vars=(await query('SELECT id_fornecedor_variante,sku_variante,stock FROM produto_variantes WHERE produto_id=$1 AND ($2=0 OR id=$2) ORDER BY id LIMIT 1',[produto.id,varianteId])).rows[0];
  const vid=vars?.id_fornecedor_variante;
  if(!vid)return res.status(409).json({erro:'Este produto ainda não tem uma Variant ID real da CJ para calcular o frete.'});
  const metodos=await cj.calcularFrete({destino:pais,zip:req.query.zip,produtos:[{vid,quantity:quantidade}]});
- res.json({origem:'cj',pais,moeda:'USD',metodos});
+ const fx=await obterTaxasEUR([moeda,'USD']); const usdPerEur=moeda==='USD'?1:Number(fx.rates.USD); const targetPerEur=Number(fx.rates[moeda]||1);
+ const convertUSD=usd=>{const custoUSD=Number(usd||0);const custoEUR=custoUSD/usdPerEur;return {custoUSD:Number(custoUSD.toFixed(2)),custoEUR:Number(custoEUR.toFixed(2)),custoMoeda:Number((custoEUR*targetPerEur).toFixed(2))};};
+ res.json({origem:'cj',pais,moeda,disponivel:metodos.length>0,metodos:metodos.map(m=>({...m,...convertUSD(m.custoUSD),taxasMoeda:m.taxesUSD==null?null:convertUSD(m.taxesUSD).custoMoeda,desalfandegamentoMoeda:m.desalfandegamentoUSD==null?null:convertUSD(m.desalfandegamentoUSD).custoMoeda,totalMoeda:m.totalUSD==null?null:convertUSD(m.totalUSD).custoMoeda})),fxData:fx.updatedAt||fx.date||null});
 }catch(e){next(e)}});
 router.get('/:id/avaliacoes',async(req,res,next)=>{try{
  const produto=(await query('SELECT id,fornecedor,id_fornecedor FROM produtos WHERE id=$1 AND ativo=true',[req.params.id])).rows[0];
