@@ -1,31 +1,10 @@
-// Integração com a API de pagamento em Kwanza (AppyPay / Multicaixa Express).
-//
-// O utilizador já tem esta API pronta — este ficheiro é o ponto único de
-// ligação a ela. Substituir APPYPAY_API_KEY no .env pela chave real, e o
-// corpo de `criarCobranca` pela chamada HTTP real à API do AppyPay.
-//
-// Fluxo típico do AppyPay: cria-se uma "cobrança" (charge) em AOA, o cliente
-// confirma no telemóvel via Multicaixa Express, e a confirmação chega por
-// webhook (ver routes/webhooks.js -> /webhooks/pagamento-aoa-confirmado).
-
-const APPYPAY_API_KEY = process.env.APPYPAY_API_KEY || null;
-
-async function criarCobranca({ pedidoId, valorAOA, telefoneCliente }) {
-  if (!APPYPAY_API_KEY) {
-    console.log(`[AppyPay][MOCK] A criar cobrança de ${valorAOA} AOA para o pedido ${pedidoId}, telefone ${telefoneCliente}`);
-  }
-  // TODO produção: chamar a API real do AppyPay para gerar a cobrança
-  // (normalmente devolve um ID de referência que o cliente confirma na app MCX Express)
-  return {
-    sucesso: true,
-    idCobranca: `APPY-${Math.floor(Math.random() * 900000)}`,
-    estado: 'pendente' // muda para "pago" via webhook
-  };
+// A AppyPay exige credenciais e contrato/API habilitados na conta do comerciante.
+// Não há fallback MOCK: sem configuração real o checkout AOA falha explicitamente.
+async function criarCobranca({pedidoId,valorAOA,telefoneCliente}){
+ const base=process.env.APPYPAY_API_URL, key=process.env.APPYPAY_API_KEY;
+ if(!base||!key) throw new Error('AppyPay não configurado. Defina APPYPAY_API_URL e APPYPAY_API_KEY no Render.');
+ const r=await fetch(`${base.replace(/\/$/,'')}/charges`,{method:'POST',headers:{'Authorization':`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({externalReference:String(pedidoId),amount:valorAOA,currency:'AOA',customer:{phone:telefoneCliente}})});
+ const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d.message||`AppyPay respondeu ${r.status}.`);
+ const id=d.id||d.reference||d.chargeId; if(!id) throw new Error('Resposta AppyPay sem identificador de cobrança.'); return {idCobranca:id,estado:'pendente',dados:d};
 }
-
-async function consultarEstadoCobranca(idCobranca) {
-  // TODO produção: consultar estado real na API do AppyPay
-  return { idCobranca, estado: 'pago' };
-}
-
-module.exports = { criarCobranca, consultarEstadoCobranca };
+module.exports={criarCobranca};

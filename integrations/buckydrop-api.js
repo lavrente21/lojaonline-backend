@@ -1,31 +1,8 @@
-// Integração com o Buckydrop.
-//
-// Modo SIMULADO (mock) — ver nota igual em cj-api.js.
-// Para ligar à API real: colocar BUCKYDROP_API_KEY no .env e confirmar os
-// endpoints exatos com o suporte do Buckydrop (documentação pública é mais
-// focada em apps prontas para Shopify/WooCommerce do que em API custom).
-
-const BUCKYDROP_API_KEY = process.env.BUCKYDROP_API_KEY || null;
-
-async function criarPedido({ pedidoId, itens, moradaEntrega }) {
-  if (!BUCKYDROP_API_KEY) {
-    console.log(`[Buckydrop-API][MOCK] A criar pedido ${pedidoId} no Buckydrop com ${itens.length} item(ns) para: ${moradaEntrega.linha1}, ${moradaEntrega.cidade}`);
-  }
-  // TODO produção: chamar o endpoint real de criação de pedido do Buckydrop
-  return {
-    sucesso: true,
-    idPedidoFornecedor: `BKY-${Math.floor(Math.random() * 900000 + 100000)}`,
-    prazoEstimadoDias: '10-18'
-  };
-}
-
-async function consultarRastreio(idPedidoFornecedor) {
-  // TODO produção: chamar o endpoint real de rastreio do Buckydrop
-  return {
-    idPedidoFornecedor,
-    codigoRastreio: `BKYTRACK${Math.floor(Math.random() * 900000)}`,
-    estado: 'em_transito'
-  };
-}
-
-module.exports = { criarPedido, consultarRastreio };
+const crypto=require('crypto');
+const BASE=process.env.BUCKYDROP_API_URL;
+function cfg(){if(!BASE||!process.env.BUCKYDROP_APPCODE||!process.env.BUCKYDROP_APPSECRET)throw new Error('BuckyDrop não configurado: BUCKYDROP_API_URL/APPCODE/APPSECRET.');}
+function signPost(body,t){return crypto.createHash('md5').update(process.env.BUCKYDROP_APPCODE+JSON.stringify(body)+t+process.env.BUCKYDROP_APPSECRET).digest('hex')}
+async function post(path,body){cfg();const t=Date.now(),s=signPost(body,t);const r=await fetch(BASE.replace(/\/$/,'')+path+`?appCode=${encodeURIComponent(process.env.BUCKYDROP_APPCODE)}&timestamp=${t}&sign=${s}`,{method:'POST',headers:{'Content-Type':'application/json',lang:'en'},body:JSON.stringify(body)});const d=await r.json().catch(()=>({}));if(!r.ok||d.success===false)throw new Error(d.message||`BuckyDrop respondeu ${r.status}.`);return d}
+async function criarPedido({pedidoId,itens,moradaEntrega}){const body={platformOrderId:String(pedidoId),shippingCountry:moradaEntrega.pais,shippingCity:moradaEntrega.cidade,shippingAddress:moradaEntrega.linha1,shippingZip:moradaEntrega.codigoPostal||'',shippingPhone:moradaEntrega.telefone||'',items:itens.map(i=>({sku:i.skuFornecedor||i.idFornecedor,quantity:i.quantidade}))};const d=await post(process.env.BUCKYDROP_ORDER_PATH||'/api/rest/v2/order/create',body);const data=d.data||d;return{idPedidoFornecedor:data.orderId||data.id,prazoEstimadoDias:null,dados:data}}
+async function consultarRastreio(id){const d=await post(process.env.BUCKYDROP_TRACK_PATH||'/api/rest/v2/logistics/track',{orderId:id});const data=d.data||d;return{idPedidoFornecedor:id,codigoRastreio:data.trackingNumber||data.trackNumber||null,estado:data.status||null,dados:data}}
+module.exports={criarPedido,consultarRastreio};

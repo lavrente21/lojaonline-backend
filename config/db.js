@@ -1,63 +1,23 @@
-// Base de dados simples em ficheiro JSON.
-// Em produção, isto seria substituído por PostgreSQL/MySQL — a interface
-// (ler, guardar, gerar id) mantém-se igual, só a implementação muda.
+const { Pool } = require('pg');
 
-const fs = require('fs');
-const path = require('path');
+if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL não configurada. Use a connection string do Supabase.');
 
-const CAMINHO_DB = path.join(__dirname, '..', 'data', 'db.json');
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
+  max: Number(process.env.DB_POOL_MAX || 10),
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000
+});
 
-function estadoInicial() {
-  return {
-    produtos: [
-      {
-        id: 'prod_001',
-        nome: 'Sérum de vitamina C 20%',
-        categoria: 'Skincare',
-        precoVendaEUR: 32.90,
-        precoCustoEUR: 14.20,
-        fornecedor: 'cj',
-        idFornecedor: 'CJ-8823741',
-        stock: 48
-      },
-      {
-        id: 'prod_002',
-        nome: 'Máscara capilar reparadora',
-        categoria: 'Hair care',
-        precoVendaEUR: 24.50,
-        precoCustoEUR: 9.80,
-        fornecedor: 'buckydrop',
-        idFornecedor: 'BKY-55210',
-        stock: 32
-      }
-    ],
-    pedidos: [],
-    clientes: [],
-    admins: [
-      // password: "admin123" (hash gerado com bcryptjs, ver seed.js)
-      { id: 'admin_001', nome: 'Ana Ribeiro', email: 'ana@lumina-beauty.com', passwordHash: null }
-    ],
-    contadores: { pedido: 48213 }
-  };
+pool.on('error', err => console.error('[DB] erro inesperado no pool:', err));
+
+async function query(text, params) { return pool.query(text, params); }
+async function transaction(fn) {
+  const client = await pool.connect();
+  try { await client.query('BEGIN'); const result = await fn(client); await client.query('COMMIT'); return result; }
+  catch (e) { await client.query('ROLLBACK'); throw e; }
+  finally { client.release(); }
 }
 
-function ler() {
-  if (!fs.existsSync(CAMINHO_DB)) {
-    guardar(estadoInicial());
-  }
-  const conteudo = fs.readFileSync(CAMINHO_DB, 'utf-8');
-  return JSON.parse(conteudo);
-}
-
-function guardar(estado) {
-  fs.writeFileSync(CAMINHO_DB, JSON.stringify(estado, null, 2));
-}
-
-function proximoNumeroPedido() {
-  const estado = ler();
-  estado.contadores.pedido += 1;
-  guardar(estado);
-  return `LUM-${estado.contadores.pedido}`;
-}
-
-module.exports = { ler, guardar, proximoNumeroPedido, CAMINHO_DB };
+module.exports = { pool, query, transaction };

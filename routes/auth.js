@@ -1,50 +1,27 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { ler, guardar } = require('../config/db');
+const { query } = require('../config/db');
 const { gerarToken } = require('../middleware/auth');
-
 const router = express.Router();
+const normalizar = e => String(e || '').trim().toLowerCase();
 
-// ---------- Registo de cliente ----------
-router.post('/clientes/registar', async (req, res) => {
-  const { nome, email, palavraPasse } = req.body;
-  if (!nome || !email || !palavraPasse) {
-    return res.status(400).json({ erro: 'Nome, e-mail e palavra-passe são obrigatórios.' });
-  }
-  const db = ler();
-  if (db.clientes.find(c => c.email === email)) {
-    return res.status(409).json({ erro: 'Já existe uma conta com este e-mail.' });
-  }
-  const passwordHash = await bcrypt.hash(palavraPasse, 10);
-  const cliente = { id: `cli_${Date.now()}`, nome, email, passwordHash, enderecos: [] };
-  db.clientes.push(cliente);
-  guardar(db);
-  const token = gerarToken({ id: cliente.id, tipo: 'cliente' });
-  res.json({ token, cliente: { id: cliente.id, nome, email } });
-});
+router.post('/clientes/registar', async (req,res,next)=>{ try {
+  const { nome, email, palavraPasse, telefone } = req.body;
+  if(!nome || !email || !palavraPasse || palavraPasse.length < 8) return res.status(400).json({erro:'Nome, e-mail e palavra-passe (mínimo 8 caracteres) são obrigatórios.'});
+  const e=normalizar(email); const existe=await query('SELECT id FROM clientes WHERE email=$1',[e]); if(existe.rowCount) return res.status(409).json({erro:'Já existe uma conta com este e-mail.'});
+  const hash=await bcrypt.hash(palavraPasse,12); const r=await query('INSERT INTO clientes(nome,email,password_hash,telefone) VALUES($1,$2,$3,$4) RETURNING id,nome,email,telefone',[nome.trim(),e,hash,telefone||null]);
+  const c=r.rows[0]; res.status(201).json({token:gerarToken({id:c.id,tipo:'cliente'}),cliente:c});
+ } catch(e){next(e)} });
 
-// ---------- Login de cliente ----------
-router.post('/clientes/login', async (req, res) => {
-  const { email, palavraPasse } = req.body;
-  const db = ler();
-  const cliente = db.clientes.find(c => c.email === email);
-  if (!cliente || !(await bcrypt.compare(palavraPasse, cliente.passwordHash))) {
-    return res.status(401).json({ erro: 'E-mail ou palavra-passe incorretos.' });
-  }
-  const token = gerarToken({ id: cliente.id, tipo: 'cliente' });
-  res.json({ token, cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email } });
-});
+router.post('/clientes/login', async(req,res,next)=>{try{
+ const e=normalizar(req.body.email); const r=await query('SELECT id,nome,email,telefone,password_hash FROM clientes WHERE email=$1',[e]); const c=r.rows[0];
+ if(!c || !(await bcrypt.compare(req.body.palavraPasse||'',c.password_hash))) return res.status(401).json({erro:'E-mail ou palavra-passe incorretos.'});
+ delete c.password_hash; res.json({token:gerarToken({id:c.id,tipo:'cliente'}),cliente:c});
+}catch(e){next(e)}});
 
-// ---------- Login de admin ----------
-router.post('/admin/login', async (req, res) => {
-  const { email, palavraPasse } = req.body;
-  const db = ler();
-  const admin = db.admins.find(a => a.email === email);
-  if (!admin || !admin.passwordHash || !(await bcrypt.compare(palavraPasse, admin.passwordHash))) {
-    return res.status(401).json({ erro: 'E-mail ou palavra-passe incorretos.' });
-  }
-  const token = gerarToken({ id: admin.id, tipo: 'admin' });
-  res.json({ token, admin: { id: admin.id, nome: admin.nome, email: admin.email } });
-});
-
-module.exports = router;
+router.post('/admin/login', async(req,res,next)=>{try{
+ const e=normalizar(req.body.email); const r=await query('SELECT id,nome,email,papel,password_hash FROM admins WHERE email=$1',[e]); const a=r.rows[0];
+ if(!a || !(await bcrypt.compare(req.body.palavraPasse||'',a.password_hash))) return res.status(401).json({erro:'E-mail ou palavra-passe incorretos.'});
+ delete a.password_hash; res.json({token:gerarToken({id:a.id,tipo:'admin',papel:a.papel}),admin:a});
+}catch(e){next(e)}});
+module.exports=router;

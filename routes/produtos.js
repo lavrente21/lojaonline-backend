@@ -1,85 +1,10 @@
-const express = require('express');
-const { ler, guardar } = require('../config/db');
-const { exigirAutenticacao } = require('../middleware/auth');
-const cjApi = require('../integrations/cj-api');
-
-const router = express.Router();
-
-// ---------- Público: listar produtos ----------
-router.get('/', (req, res) => {
-  const db = ler();
-  res.json(db.produtos);
-});
-
-// ---------- Admin: pré-visualizar um produto da CJ antes de importar ----------
-// Não grava nada — só busca os dados na CJ para pré-preencher o formulário
-// "Novo produto". Fica antes de "/:id" para não ser interpretada como um id.
-// GET /produtos/importar/cj?id=<ID ou link do produto na CJ>
-router.get('/importar/cj', exigirAutenticacao('admin'), async (req, res) => {
-  const { id } = req.query;
-  if (!id || !id.trim()) {
-    return res.status(400).json({ erro: 'Indica o ID ou o link do produto na CJ.' });
-  }
-  try {
-    const produtoCJ = await cjApi.buscarProdutoPorId(id);
-    res.json(produtoCJ);
-  } catch (e) {
-    // 502: a nossa API está bem, quem falhou foi a CJ (ID inválido, token, etc.)
-    res.status(502).json({ erro: e.message });
-  }
-});
-
-router.get('/:id', (req, res) => {
-  const db = ler();
-  const produto = db.produtos.find(p => p.id === req.params.id);
-  if (!produto) return res.status(404).json({ erro: 'Produto não encontrado.' });
-  res.json(produto);
-});
-
-// ---------- Admin: criar produto ----------
-router.post('/', exigirAutenticacao('admin'), (req, res) => {
-  const db = ler();
-  const {
-    nome, categoria, precoVendaEUR, precoCustoEUR, fornecedor, idFornecedor, stock,
-    // Opcionais — normalmente vêm preenchidos quando o produto foi importado da CJ
-    descricao, imagemUrl, imagens, skuFornecedor
-  } = req.body;
-  if (!nome || !fornecedor || !['cj', 'buckydrop'].includes(fornecedor)) {
-    return res.status(400).json({ erro: 'Nome e fornecedor (cj|buckydrop) são obrigatórios.' });
-  }
-  const produto = {
-    id: `prod_${Date.now()}`,
-    nome, categoria: categoria || '',
-    precoVendaEUR: Number(precoVendaEUR) || 0,
-    precoCustoEUR: Number(precoCustoEUR) || 0,
-    fornecedor, idFornecedor: idFornecedor || '',
-    stock: Number(stock) || 0,
-    descricao: descricao || '',
-    imagemUrl: imagemUrl || '',
-    imagens: Array.isArray(imagens) ? imagens : [],
-    skuFornecedor: skuFornecedor || ''
-  };
-  db.produtos.push(produto);
-  guardar(db);
-  res.status(201).json(produto);
-});
-
-// ---------- Admin: editar produto ----------
-router.put('/:id', exigirAutenticacao('admin'), (req, res) => {
-  const db = ler();
-  const produto = db.produtos.find(p => p.id === req.params.id);
-  if (!produto) return res.status(404).json({ erro: 'Produto não encontrado.' });
-  Object.assign(produto, req.body);
-  guardar(db);
-  res.json(produto);
-});
-
-// ---------- Admin: apagar produto ----------
-router.delete('/:id', exigirAutenticacao('admin'), (req, res) => {
-  const db = ler();
-  db.produtos = db.produtos.filter(p => p.id !== req.params.id);
-  guardar(db);
-  res.json({ sucesso: true });
-});
-
-module.exports = router;
+const express=require('express'); const {query,transaction}=require('../config/db'); const {exigirAutenticacao}=require('../middleware/auth'); const cj=require('../integrations/cj-api');
+const router=express.Router();
+const map=p=>({...p,id:Number(p.id),precoVendaEUR:Number(p.preco_venda_eur),precoCustoEUR:Number(p.preco_custo_eur),idFornecedor:p.id_fornecedor,skuFornecedor:p.sku_fornecedor,stock:Number(p.stock),categoria:p.categoria_nome||''});
+router.get('/',async(req,res,next)=>{try{const r=await query(`SELECT p.*,c.nome categoria_nome,(SELECT url FROM produto_imagens i WHERE i.produto_id=p.id ORDER BY i.principal DESC,i.ordem LIMIT 1) imagem_principal FROM produtos p LEFT JOIN categorias c ON c.id=p.categoria_id WHERE p.ativo=true ORDER BY p.criado_em DESC`);res.json(r.rows.map(map))}catch(e){next(e)}});
+router.get('/:id',async(req,res,next)=>{try{const r=await query(`SELECT p.*,c.nome categoria_nome FROM produtos p LEFT JOIN categorias c ON c.id=p.categoria_id WHERE p.id=$1 AND p.ativo=true`,[req.params.id]);if(!r.rowCount)return res.status(404).json({erro:'Produto não encontrado.'});const p=map(r.rows[0]);const imgs=await query('SELECT url,principal,ordem FROM produto_imagens WHERE produto_id=$1 ORDER BY ordem',[req.params.id]);const vars=await query('SELECT id,nome_opcao,valor_opcao,sku_variante,preco_extra_eur,stock,imagem_url FROM produto_variantes WHERE produto_id=$1',[req.params.id]);p.imagens=imgs.rows;p.variantes=vars.rows;res.json(p)}catch(e){next(e)}});
+router.post('/',exigirAutenticacao('admin'),async(req,res,next)=>{try{const {nome,categoria,precoVendaEUR,precoCustoEUR,fornecedor,idFornecedor,skuFornecedor,stock,descricao}=req.body;if(!nome||!fornecedor)return res.status(400).json({erro:'Nome e fornecedor são obrigatórios.'});const r=await query(`INSERT INTO produtos(nome,categoria_id,descricao,preco_venda_eur,preco_custo_eur,fornecedor,id_fornecedor,sku_fornecedor,stock) VALUES($1,(SELECT id FROM categorias WHERE lower(nome)=lower($2) LIMIT 1),$3,$4,$5,$6,$7,$8,$9) RETURNING *`,[nome,categoria||null,descricao||null,Number(precoVendaEUR)||0,Number(precoCustoEUR)||0,fornecedor,idFornecedor||null,skuFornecedor||null,Number(stock)||0]);res.status(201).json(map(r.rows[0]))}catch(e){next(e)}});
+router.put('/:id',exigirAutenticacao('admin'),async(req,res,next)=>{try{const allowed=['nome','descricao','precoVendaEUR','precoCustoEUR','fornecedor','idFornecedor','skuFornecedor','stock','ativo','destaque'];const vals=[],sets=[];for(const k of allowed)if(req.body[k]!==undefined){const col={precoVendaEUR:'preco_venda_eur',precoCustoEUR:'preco_custo_eur',idFornecedor:'id_fornecedor',skuFornecedor:'sku_fornecedor'}[k]||k;vals.push(req.body[k]);sets.push(`${col}=$${vals.length}`)}if(!sets.length)return res.status(400).json({erro:'Nenhuma alteração.'});vals.push(req.params.id);const r=await query(`UPDATE produtos SET ${sets.join(',')} WHERE id=$${vals.length} RETURNING *`,vals);if(!r.rowCount)return res.status(404).json({erro:'Produto não encontrado.'});res.json(map(r.rows[0]))}catch(e){next(e)}});
+router.delete('/:id',exigirAutenticacao('admin'),async(req,res,next)=>{try{const r=await query('UPDATE produtos SET ativo=false WHERE id=$1 RETURNING id',[req.params.id]);if(!r.rowCount)return res.status(404).json({erro:'Produto não encontrado.'});res.json({sucesso:true})}catch(e){next(e)}});
+router.get('/importar/cj',exigirAutenticacao('admin'),async(req,res,next)=>{try{const id=String(req.query.id||'').trim();if(!id)return res.status(400).json({erro:'ID do produto CJ obrigatório.'});const d=await cj.consultarProduto(id);res.json(d)}catch(e){next(e)}});
+module.exports=router;

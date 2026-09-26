@@ -1,53 +1,9 @@
-const express = require('express');
-const { ler, guardar } = require('../config/db');
-const { exigirAutenticacao } = require('../middleware/auth');
-
-const router = express.Router();
-
-// ---------- Público: rastrear pedido por número + e-mail (sem precisar de login) ----------
-router.get('/rastrear/:numeroPedido', (req, res) => {
-  const db = ler();
-  const pedido = db.pedidos.find(p => p.id === req.params.numeroPedido);
-  if (!pedido) return res.status(404).json({ erro: 'Pedido não encontrado.' });
-  res.json({
-    numeroPedido: pedido.id,
-    estado: pedido.estado,
-    rotaEnvio: pedido.rotaEnvio,
-    fornecedores: pedido.fornecedores
-  });
-});
-
-// ---------- Cliente: ver os seus próprios pedidos ----------
-router.get('/meus', exigirAutenticacao('cliente'), (req, res) => {
-  const db = ler();
-  const pedidos = db.pedidos.filter(p => p.clienteId === req.utilizador.id);
-  res.json(pedidos);
-});
-
-// ---------- Admin: listar todos os pedidos ----------
-router.get('/', exigirAutenticacao('admin'), (req, res) => {
-  const db = ler();
-  res.json(db.pedidos);
-});
-
-// ---------- Admin: ver detalhe de um pedido ----------
-router.get('/:numeroPedido', exigirAutenticacao('admin'), (req, res) => {
-  const db = ler();
-  const pedido = db.pedidos.find(p => p.id === req.params.numeroPedido);
-  if (!pedido) return res.status(404).json({ erro: 'Pedido não encontrado.' });
-  res.json(pedido);
-});
-
-// ---------- Admin: atualizar manualmente o estado de um sub-pedido (exceções) ----------
-router.put('/:numeroPedido/fornecedor/:fornecedor', exigirAutenticacao('admin'), (req, res) => {
-  const db = ler();
-  const pedido = db.pedidos.find(p => p.id === req.params.numeroPedido);
-  if (!pedido || !pedido.fornecedores[req.params.fornecedor]) {
-    return res.status(404).json({ erro: 'Pedido ou fornecedor não encontrado.' });
-  }
-  Object.assign(pedido.fornecedores[req.params.fornecedor], req.body);
-  guardar(db);
-  res.json(pedido.fornecedores[req.params.fornecedor]);
-});
-
-module.exports = router;
+const express=require('express');const {query,transaction}=require('../config/db');const {exigirAutenticacao}=require('../middleware/auth');const router=express.Router();
+function map(p,items,fs,pay){return{numeroPedido:p.numero,estado:p.estado,clienteId:p.cliente_id,totalEUR:Number(p.total_eur),moeda:p.moeda,rotaEnvio:p.rota_envio,moradaEntrega:{linha1:p.entrega_linha1,linha2:p.entrega_linha2,cidade:p.entrega_cidade,codigoPostal:p.entrega_codigo_postal,pais:p.entrega_pais,telefone:p.entrega_telefone},itens:items?.rows||[],fornecedores:fs?.rows||[],pagamento:pay?.rows?.[0]||null,criadoEm:p.criado_em}}
+async function load(id){const p=(await query('SELECT * FROM pedidos WHERE id=$1 OR numero=$1 LIMIT 1',[id])).rows[0];if(!p)return null;const items=await query('SELECT * FROM pedido_itens WHERE pedido_id=$1 ORDER BY id',[p.id]);const fs=await query('SELECT * FROM pedido_fornecedores WHERE pedido_id=$1',[p.id]);const pay=await query('SELECT * FROM pedido_pagamentos WHERE pedido_id=$1',[p.id]);return map(p,items,fs,pay)}
+router.get('/rastrear/:numeroPedido',async(req,res,next)=>{try{const p=await load(req.params.numeroPedido);if(!p)return res.status(404).json({erro:'Pedido não encontrado.'});res.json({numeroPedido:p.numeroPedido,estado:p.estado,rotaEnvio:p.rotaEnvio,fornecedores:p.fornecedores})}catch(e){next(e)}});
+router.get('/meus',exigirAutenticacao('cliente'),async(req,res,next)=>{try{const r=await query('SELECT id FROM pedidos WHERE cliente_id=$1 ORDER BY criado_em DESC',[req.utilizador.id]);const out=[];for(const x of r.rows)out.push(await load(x.id));res.json(out)}catch(e){next(e)}});
+router.get('/',exigirAutenticacao('admin'),async(req,res,next)=>{try{const r=await query('SELECT id FROM pedidos ORDER BY criado_em DESC');const out=[];for(const x of r.rows)out.push(await load(x.id));res.json(out)}catch(e){next(e)}});
+router.get('/:numeroPedido',exigirAutenticacao('admin'),async(req,res,next)=>{try{const p=await load(req.params.numeroPedido);if(!p)return res.status(404).json({erro:'Pedido não encontrado.'});res.json(p)}catch(e){next(e)}});
+router.put('/:numeroPedido/fornecedor/:fornecedor',exigirAutenticacao('admin'),async(req,res,next)=>{try{const p=(await query('SELECT id FROM pedidos WHERE numero=$1',[req.params.numeroPedido])).rows[0];if(!p)return res.status(404).json({erro:'Pedido não encontrado.'});const allowed=['rastreio1','rastreio2','estado','id_pedido_fornecedor','prazo_estimado_dias'];const sets=[],vals=[];for(const k of allowed)if(req.body[k]!==undefined){vals.push(req.body[k]);sets.push(`${k}=$${vals.length}`)}if(!sets.length)return res.status(400).json({erro:'Nenhuma alteração.'});vals.push(p.id,req.params.fornecedor);const r=await query(`UPDATE pedido_fornecedores SET ${sets.join(',')} WHERE pedido_id=$${vals.length-1} AND fornecedor=$${vals.length} RETURNING *`,vals);if(!r.rowCount)return res.status(404).json({erro:'Fornecedor não encontrado neste pedido.'});res.json(r.rows[0])}catch(e){next(e)}});
+module.exports=router;

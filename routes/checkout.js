@@ -1,95 +1,10 @@
-const express = require('express');
-const { ler, guardar, proximoNumeroPedido } = require('../config/db');
-const { travarCambioParaPedido } = require('../integrations/cambio');
-const { resolverMoradaParaFornecedor } = require('../integrations/roteamento-envio');
-const { criarSessaoStripe } = require('../integrations/pagamentos-eur');
-const { criarCobranca } = require('../integrations/appypay');
-
-const router = express.Router();
-
-/**
- * POST /api/checkout
- * body: {
- *   itens: [{ produtoId, quantidade }],
- *   moradaEntrega: { linha1, cidade, codigoPostal, pais },  // pais em ISO2, ex: "AO", "PT", "US"
- *   moeda: "EUR" | "AOA",
- *   telefoneCliente: "+244..."   // obrigatório se moeda = AOA
- * }
- */
-router.post('/', async (req, res) => {
-  const { itens, moradaEntrega, moeda, telefoneCliente, clienteId } = req.body;
-
-  if (!itens || itens.length === 0) return res.status(400).json({ erro: 'Carrinho vazio.' });
-  if (!moradaEntrega || !moradaEntrega.pais) return res.status(400).json({ erro: 'Morada de entrega incompleta.' });
-
-  const db = ler();
-
-  // 1. Calcular itens e total em EUR (moeda base do catálogo)
-  const itensResolvidos = [];
-  let totalEUR = 0;
-  for (const item of itens) {
-    const produto = db.produtos.find(p => p.id === item.produtoId);
-    if (!produto) return res.status(404).json({ erro: `Produto ${item.produtoId} não encontrado.` });
-    const subtotal = produto.precoVendaEUR * item.quantidade;
-    totalEUR += subtotal;
-    itensResolvidos.push({
-      produtoId: produto.id, nome: produto.nome, fornecedor: produto.fornecedor,
-      quantidade: item.quantidade, precoUnitarioEUR: produto.precoVendaEUR
-    });
-  }
-
-  // 2. Decidir rota de envio: direto ou via agente de carga (ex: Angola)
-  const rota = resolverMoradaParaFornecedor(moradaEntrega.pais, moradaEntrega);
-
-  // 3. Se pagamento em AOA, travar câmbio agora (fica gravado no pedido, não muda depois)
-  let infoCambio = null;
-  if (moeda === 'AOA') {
-    if (!telefoneCliente) return res.status(400).json({ erro: 'Telefone é obrigatório para pagamento em Kwanza.' });
-    infoCambio = await travarCambioParaPedido(totalEUR);
-  }
-
-  // 4. Criar o pedido em estado "novo" (aguarda confirmação de pagamento)
-  const numeroPedido = proximoNumeroPedido();
-  const pedido = {
-    id: numeroPedido,
-    clienteId: clienteId || null,
-    itens: itensResolvidos,
-    totalEUR,
-    moeda,
-    cambio: infoCambio, // null se pagou em EUR
-    moradaEntregaFinal: moradaEntrega,
-    rotaEnvio: rota.tipo, // "direto" | "agente_de_carga"
-    moradaEnviadaAoFornecedor: rota.morada,
-    estado: 'novo', // novo -> pago -> processando -> enviado_fornecedor -> [enviado_agente] -> a_caminho -> entregue
-    pagamento: { estado: 'pendente' },
-    fornecedores: {}, // preenchido depois de pago, por fornecedor: { idPedidoFornecedor, rastreio1, rastreio2, estado }
-    criadoEm: new Date().toISOString()
-  };
-  db.pedidos.push(pedido);
-  guardar(db);
-
-  // 5. Iniciar o pagamento na forma escolhida
-  let dadosPagamento;
-  if (moeda === 'AOA') {
-    dadosPagamento = await criarCobranca({
-      pedidoId: numeroPedido,
-      valorAOA: infoCambio.valorAOA,
-      telefoneCliente
-    });
-    pedido.pagamento = { metodo: 'appypay', idCobranca: dadosPagamento.idCobranca, estado: 'pendente' };
-  } else {
-    dadosPagamento = await criarSessaoStripe({ pedidoId: numeroPedido, valorEUR: totalEUR });
-    pedido.pagamento = { metodo: 'stripe', urlCheckout: dadosPagamento.urlCheckout, estado: 'pendente' };
-  }
-  guardar(db);
-
-  res.status(201).json({
-    numeroPedido,
-    totalEUR,
-    totalAOA: infoCambio ? infoCambio.valorAOA : null,
-    rotaEnvio: rota.tipo,
-    pagamento: pedido.pagamento
-  });
-});
-
-module.exports = router;
+const express=require('express');const {transaction,query}=require('../config/db');const {travarCambioParaPedido}=require('../integrations/cambio');const {resolverMoradaParaFornecedor}=require('../integrations/roteamento-envio');const {criarSessaoStripe}=require('../integrations/pagamentos-eur');const {criarCobranca}=require('../integrations/appypay');
+const router=express.Router();
+router.post('/',async(req,res,next)=>{try{const {itens,moradaEntrega,moeda,telefoneCliente,clienteId,email,nome}=req.body;if(!Array.isArray(itens)||!itens.length)return res.status(400).json({erro:'Carrinho vazio.'});if(!moradaEntrega?.pais||!moradaEntrega?.linha1||!moradaEntrega?.cidade)return res.status(400).json({erro:'Morada incompleta.'});if(!['EUR','AOA'].includes(moeda))return res.status(400).json({erro:'Moeda inválida.'});
+ const ids=itens.map(i=>Number(i.produtoId));const r=await query(`SELECT p.*,c.nome categoria_nome FROM produtos p LEFT JOIN categorias c ON c.id=p.categoria_id WHERE p.id=ANY($1::bigint[]) AND p.ativo=true`,[ids]);if(r.rowCount!==new Set(ids).size)return res.status(400).json({erro:'Um ou mais produtos não estão disponíveis.'});const by=new Map(r.rows.map(p=>[Number(p.id),p]));let total=0;const resolvidos=[];for(const i of itens){const p=by.get(Number(i.produtoId));const q=Number(i.quantidade);if(!Number.isInteger(q)||q<1)return res.status(400).json({erro:'Quantidade inválida.'});if(Number(p.stock)<q)return res.status(409).json({erro:`Stock insuficiente para ${p.nome}.`});total+=Number(p.preco_venda_eur)*q;resolvidos.push({produtoId:Number(p.id),nomeProduto:p.nome,fornecedor:p.fornecedor,quantidade:q,preco:Number(p.preco_venda_eur),idFornecedor:p.id_fornecedor,skuFornecedor:p.sku_fornecedor});}
+ const rota=resolverMoradaParaFornecedor(moradaEntrega.pais,{...moradaEntrega,nome,email,telefone:telefoneCliente});let cambio=null;if(moeda==='AOA'){if(!telefoneCliente)return res.status(400).json({erro:'Telefone obrigatório para pagamento em AOA.'});cambio=await travarCambioParaPedido(total)}
+ const pedido=await transaction(async c=>{const pr=await c.query(`INSERT INTO pedidos(cliente_id,total_eur,moeda,cambio_taxa_usada,cambio_valor_eur,cambio_valor_aoa,cambio_data,entrega_linha1,entrega_linha2,entrega_cidade,entrega_codigo_postal,entrega_pais,entrega_telefone,rota_envio,fornecedor_morada_nome,fornecedor_morada_linha1,fornecedor_morada_cidade,fornecedor_morada_cp,fornecedor_morada_pais,fornecedor_morada_telefone,fornecedor_morada_ref,estado) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,'novo') RETURNING *`,[clienteId||null,total,moeda,cambio?.taxaUsada||null,cambio?.valorEUR||null,cambio?.valorAOA||null,cambio?.dataCambio||null,moradaEntrega.linha1,moradaEntrega.linha2||null,moradaEntrega.cidade,moradaEntrega.codigoPostal||null,moradaEntrega.pais,telefoneCliente||null,rota.tipo,rota.morada.nome,rota.morada.linha1,rota.morada.cidade,rota.morada.codigoPostal,rota.morada.pais,rota.morada.telefone,rota.morada.referenciaInterna||null]);const p=pr.rows[0];for(const i of resolvidos)await c.query(`INSERT INTO pedido_itens(pedido_id,produto_id,nome_produto,fornecedor,quantidade,preco_unitario_eur) VALUES($1,$2,$3,$4,$5,$6)`,[p.id,i.produtoId,i.nomeProduto,i.fornecedor,i.quantidade,i.preco]);return p});
+ let pagamento;if(moeda==='EUR')pagamento=await criarSessaoStripe({pedidoId:pedido.numero,valorEUR:total,email});else pagamento=await criarCobranca({pedidoId:pedido.numero,valorAOA:cambio.valorAOA,telefoneCliente});
+ await query(`INSERT INTO pedido_pagamentos(pedido_id,metodo,estado,id_cobranca,url_checkout) VALUES($1,$2,'pendente',$3,$4)`,[pedido.id,moeda==='EUR'?'stripe':'appypay',pagamento.idCobranca||null,pagamento.urlCheckout||null]);
+ res.status(201).json({numeroPedido:pedido.numero,totalEUR:total,totalAOA:cambio?.valorAOA||null,rotaEnvio:rota.tipo,pagamento:{metodo:moeda==='EUR'?'stripe':'appypay',idCobranca:pagamento.idCobranca||null,urlCheckout:pagamento.urlCheckout||null,estado:'pendente'}});
+}catch(e){next(e)}});module.exports=router;
