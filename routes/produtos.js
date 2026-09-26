@@ -26,6 +26,19 @@ router.get('/:id/fretes',async(req,res,next)=>{try{
  const convertUSD=usd=>{const custoUSD=Number(usd||0);const custoEUR=custoUSD/usdPerEur;return {custoUSD:Number(custoUSD.toFixed(2)),custoEUR:Number(custoEUR.toFixed(2)),custoMoeda:Number((custoEUR*targetPerEur).toFixed(2))};};
  res.json({origem:'cj',pais,moeda,disponivel:metodos.length>0,metodos:metodos.map(m=>({...m,...convertUSD(m.custoUSD),taxasMoeda:m.taxesUSD==null?null:convertUSD(m.taxesUSD).custoMoeda,desalfandegamentoMoeda:m.desalfandegamentoUSD==null?null:convertUSD(m.desalfandegamentoUSD).custoMoeda,totalMoeda:m.totalUSD==null?null:convertUSD(m.totalUSD).custoMoeda})),fxData:fx.updatedAt||fx.date||null});
 }catch(e){next(e)}});
+router.post('/:id/avaliacoes',exigirAutenticacao('cliente'),async(req,res,next)=>{try{
+ const produtoId=Number(req.params.id),estrelas=Number(req.body.estrelas),comentario=String(req.body.comentario||'').trim();
+ if(!Number.isInteger(produtoId)||produtoId<1||!Number.isInteger(estrelas)||estrelas<1||estrelas>5)return res.status(400).json({erro:'Produto e classificação de 1 a 5 estrelas são obrigatórios.'});
+ if(comentario.length>3000)return res.status(400).json({erro:'A avaliação é demasiado longa.'});
+ const c=(await query('SELECT id,nome FROM clientes WHERE id=$1',[req.utilizador.id])).rows[0];
+ if(!c)return res.status(401).json({erro:'Conta de cliente inválida.'});
+ const p=(await query('SELECT id FROM produtos WHERE id=$1 AND ativo=true',[produtoId])).rows[0];if(!p)return res.status(404).json({erro:'Produto não encontrado.'});
+ const comprou=(await query(`SELECT 1 FROM pedidos p JOIN pedido_pagamentos pp ON pp.pedido_id=p.id JOIN pedido_itens pi ON pi.pedido_id=p.id WHERE p.cliente_id=$1 AND pi.produto_id=$2 AND pp.estado='pago' LIMIT 1`,[req.utilizador.id,produtoId])).rowCount;
+ if(!comprou)return res.status(403).json({erro:'Só pode avaliar produtos que tenha comprado.'});
+ const existe=(await query('SELECT id FROM avaliacoes WHERE produto_id=$1 AND cliente_id=$2',[produtoId,req.utilizador.id])).rows[0];if(existe)return res.status(409).json({erro:'Já enviou uma avaliação para este produto.'});
+ const r=await query(`INSERT INTO avaliacoes(produto_id,cliente_id,nome_autor,estrelas,comentario,aprovado) VALUES($1,$2,$3,$4,$5,false) RETURNING id,nome_autor,estrelas,comentario,aprovado,criado_em`,[produtoId,c.id,c.nome,estrelas,comentario||null]);
+ res.status(201).json({sucesso:true,avaliacao:r.rows[0],mensagem:'Avaliação enviada para moderação.'});
+}catch(e){next(e)}});
 router.get('/:id/avaliacoes',async(req,res,next)=>{try{
  const produto=(await query('SELECT id,fornecedor,id_fornecedor FROM produtos WHERE id=$1 AND ativo=true',[req.params.id])).rows[0];
  if(!produto)return res.status(404).json({erro:'Produto não encontrado.'});

@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: lumina-api
+    name: lojaonline-backend
     runtime: node
     plan: free
     buildCommand: npm install
@@ -28,6 +28,14 @@ services:
       - key: APPYPAY_API_KEY
         sync: false
       - key: APPYPAY_WEBHOOK_SECRET
+        sync: false
+      - key: CJ_TRACKING_WEBHOOK_SECRET
+        sync: false
+      - key: BUCKYDROP_TRACKING_WEBHOOK_SECRET
+        sync: false
+      - key: BUCKYDROP_ORDER_PATH
+        sync: false
+      - key: BUCKYDROP_TRACK_PATH
         sync: false
       - key: CJ_API_KEY
         sync: false
