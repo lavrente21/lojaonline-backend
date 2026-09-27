@@ -1,0 +1,89 @@
+services:
+  - type: web
+    name: lumina-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_SSL
+        value: "true"
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: DB_POOL_MAX
+        value: "10"
+      - key: DATABASE_URL
+        sync: false
+      - key: ORIGENS_PERMITIDAS
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: APPYPAY_API_URL
+        sync: false
+      - key: APPYPAY_ACCESS_TOKEN
+        sync: false
+      - key: APPYPAY_PAYMENT_METHOD
+        sync: false
+      - key: APPYPAY_WEBHOOK_SECRET
+        sync: false
+      - key: CJ_TRACKING_WEBHOOK_SECRET
+        sync: false
+      - key: BUCKYDROP_TRACKING_WEBHOOK_SECRET
+        sync: false
+      - key: CJ_API_KEY
+        sync: false
+      - key: CJ_LOGISTIC_NAME
+        sync: false
+      - key: CJ_FROM_COUNTRY_CODE
+        value: CN
+      - key: CJ_SYNC_MARGIN_PCT
+        value: "60"
+      - key: CJ_TOKEN_CACHE_DAYS
+        value: "7"
+      - key: BUCKYDROP_API_URL
+        sync: false
+      - key: BUCKYDROP_APPCODE
+        sync: false
+      - key: BUCKYDROP_APPSECRET
+        sync: false
+      - key: BUCKYDROP_ORDER_PATH
+        sync: false
+      - key: BUCKYDROP_TRACK_PATH
+        sync: false
+      - key: EXCHANGE_RATE_API_URL
+        sync: false
+      - key: EXCHANGE_RATE_API_KEY
+        sync: false
+      - key: EXCHANGE_RATE_USD_EUR_URL
+        value: https://api.frankfurter.app/latest?from=USD&to=EUR
+      - key: AGENTE_NOME
+        sync: false
+      - key: AGENTE_LINHA1
+        sync: false
+      - key: AGENTE_CIDADE
+        sync: false
+      - key: AGENTE_CODIGO_POSTAL
+        sync: false
+      - key: AGENTE_PAIS
+        sync: false
+      - key: AGENTE_TELEFONE
+        sync: false
+      - key: AGENTE_REFERENCIA
+        value: LUMINA
+      - key: PAISES_COM_ENVIO_DIRETO
+        value: PT,ES,FR,DE,IT,NL,BE,AT,IE,SE,DK,FI,PL,CZ,RO,GB,US,CA,MX,BR,CL,AR,CO
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: product-images
