@@ -13,5 +13,4 @@ function exigirAutenticacao(tipoEsperado) {
     } catch { return res.status(401).json({ erro: 'Token inválido ou expirado.' }); }
   };
 }
-function tentarAutenticacao(req,res,next){const token=(req.headers.authorization||'').startsWith('Bearer ')?req.headers.authorization.slice(7):null;if(!token)return next();try{const dados=jwt.verify(token,SEGREDO);req.utilizador=dados;}catch{}next();}
-module.exports = { gerarToken, exigirAutenticacao, tentarAutenticacao };
+module.exports = { gerarToken, exigirAutenticacao };

@@ -8,8 +8,7 @@
     "start": "node server.js",
     "seed:admin": "node scripts/seed-admin.js",
     "test": "node --check server.js && node --check migrate.js",
-    "migrate": "node migrate.js",
-    "migrate:update": "MIGRATION_FILE=2026-09-28-integracao-completa.sql node migrate.js"
+    "migrate": "node migrate.js"
   },
   "engines": {
     "node": ">=20"

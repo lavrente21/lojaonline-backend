@@ -5,17 +5,6 @@ const router=express.Router();
 const email=e=>String(e||'').trim().toLowerCase();
 const text=v=>String(v??'').trim();
 
-
-router.get('/conteudos',async(req,res,next)=>{try{
- const limite=Math.min(50,Math.max(1,Number.parseInt(req.query.limite||'20',10)||20));
- const r=await query(`SELECT id,titulo,slug,categoria,corpo,estado,imagem_url,seo_title,seo_description,criado_em,atualizado_em FROM conteudos WHERE estado='publicado' ORDER BY criado_em DESC LIMIT $1`,[limite]);
- res.json(r.rows);
-}catch(e){next(e)}});
-router.get('/conteudos/:slug',async(req,res,next)=>{try{
- const r=await query(`SELECT id,titulo,slug,categoria,corpo,estado,imagem_url,seo_title,seo_description,criado_em,atualizado_em FROM conteudos WHERE estado='publicado' AND slug=$1 LIMIT 1`,[String(req.params.slug)]);
- if(!r.rowCount)return res.status(404).json({erro:'Artigo não encontrado.'}); res.json(r.rows[0]);
-}catch(e){next(e)}});
-
 router.post('/contactos',async(req,res,next)=>{try{
   const nome=text(req.body.nome),mail=email(req.body.email),assunto=text(req.body.assunto),mensagem=text(req.body.mensagem);
   if(!nome||!mail||!/^\S+@\S+\.\S+$/.test(mail)||!assunto||!mensagem)return res.status(400).json({erro:'Nome, e-mail, assunto e mensagem são obrigatórios.'});

@@ -9,3 +9,4 @@
 - Checkout devolve rotaEnvio e mensagem de pagamento.
 - Angola continua bloqueada até configurar o agente de carga (AGENTE_*).
 - Base de dados: correr `npm run migrate` numa BD nova. Para uma BD já existente, executar só a secção "11. PAGAMENTO MANUAL" do schema.sql.
+- Conta do cliente: PUT /api/auth/clientes/me aceita novaPalavraPasse + palavraPasseAtual; novo GET /api/auth/clientes/exportar.
