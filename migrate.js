@@ -2,7 +2,7 @@ require('dotenv').config();
 const fs=require('fs');
 const path=require('path');
 const {Client}=require('pg');
-const file=path.join(__dirname,'migrations','schema.sql');
+const file=path.join(__dirname,'migrations',process.env.MIGRATION_FILE||'schema.sql');
 (async()=>{
   if(!process.env.DATABASE_URL) throw new Error('DATABASE_URL não configurada.');
   const client=new Client({connectionString:process.env.DATABASE_URL,ssl:process.env.DATABASE_SSL==='false'?false:{rejectUnauthorized:false}});
