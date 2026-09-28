@@ -1,6 +1,9 @@
 const express=require('express');
 const {query,transaction}=require('../config/db');
 const {exigirAutenticacao}=require('../middleware/auth');
+const {fulfillPedido}=require('./webhooks');
+const cj=require('../integrations/cj-api');
+const bucky=require('../integrations/buckydrop-api');
 const router=express.Router();
 const admin=exigirAutenticacao('admin');
 const slugify=s=>String(s||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,140);
@@ -39,7 +42,44 @@ router.delete('/admin/conteudo/:id',admin,async(req,res,next)=>{try{const r=awai
 
 router.get('/admin/configuracoes',admin,async(req,res,next)=>{try{const r=await query('SELECT chave,valor FROM configuracoes_loja ORDER BY chave');res.json(Object.fromEntries(r.rows.map(x=>[x.chave,x.valor])))}catch(e){next(e)}});
 router.put('/admin/configuracoes',admin,async(req,res,next)=>{try{const entries=Object.entries(req.body||{});await transaction(async c=>{for(const [k,v] of entries)await c.query(`INSERT INTO configuracoes_loja(chave,valor) VALUES($1,$2) ON CONFLICT(chave) DO UPDATE SET valor=EXCLUDED.valor,atualizado_em=now()`,[k,String(v??'')])});res.json({sucesso:true})}catch(e){next(e)}});
-router.get('/admin/pagamentos',admin,async(req,res,next)=>{try{const r=await query(`SELECT pp.id,pp.pedido_id,p.numero,p.cliente_id,p.total_eur,pp.metodo,pp.estado,pp.id_cobranca_confirmada,pp.criado_em,pp.atualizado_em FROM pedido_pagamentos pp JOIN pedidos p ON p.id=pp.pedido_id ORDER BY pp.criado_em DESC`);res.json(r.rows)}catch(e){next(e)}});
+router.get('/admin/pagamentos',admin,async(req,res,next)=>{try{
+  const r=await query(`SELECT pp.pedido_id,p.numero,p.total_eur,p.moeda,pp.metodo,pp.estado,pp.id_cobranca,pp.id_cobranca_confirmada,pp.nota,pp.atualizado_em criado_em FROM pedido_pagamentos pp JOIN pedidos p ON p.id=pp.pedido_id ORDER BY pp.atualizado_em DESC`);
+  const soma=(estado)=>r.rows.filter(x=>x.estado===estado).reduce((s,x)=>s+Number(x.total_eur||0),0);
+  res.json({stats:{recebido_eur:soma('pago'),reembolsado_eur:soma('reembolsado'),pendente_eur:soma('pendente')},pedidos:r.rows});
+}catch(e){next(e)}});
+router.put('/admin/pagamentos/:pedidoId/marcar-pago',admin,async(req,res,next)=>{try{
+  const p=(await query('SELECT id,numero FROM pedidos WHERE numero=$1 OR id::text=$1',[String(req.params.pedidoId)])).rows[0];
+  if(!p)return res.status(404).json({erro:'Pedido não encontrado.'});
+  const nota=req.body?.nota?String(req.body.nota).trim().slice(0,500):null;
+  const r=await query(`UPDATE pedido_pagamentos SET estado='pago',id_cobranca_confirmada=COALESCE(id_cobranca_confirmada,'confirmado-manualmente'),nota=COALESCE($1,nota) WHERE pedido_id=$2 AND estado<>'pago' RETURNING *`,[nota,p.id]);
+  if(!r.rowCount)return res.status(409).json({erro:'Este pagamento já estava marcado como pago ou não existe.'});
+  await fulfillPedido(p.numero);
+  res.json({sucesso:true,pedido:p.numero,pagamento:r.rows[0]});
+}catch(e){next(e)}});
+router.post('/admin/sincronizar-tracking',admin,async(req,res,next)=>{try{
+  const rows=(await query(`SELECT pf.id,pf.fornecedor,pf.id_pedido_fornecedor,p.numero FROM pedido_fornecedores pf JOIN pedidos p ON p.id=pf.pedido_id WHERE pf.id_pedido_fornecedor IS NOT NULL AND pf.estado<>'entregue'`)).rows;
+  const resultados=[];
+  for(const row of rows){
+    try{
+      const api=row.fornecedor==='cj'?cj:bucky;
+      const t=await api.consultarRastreio(row.id_pedido_fornecedor);
+      if(t.codigoRastreio)await query('UPDATE pedido_fornecedores SET rastreio1=$1 WHERE id=$2',[t.codigoRastreio,row.id]);
+      resultados.push({numero:row.numero,fornecedor:row.fornecedor,ok:true,rastreio:t.codigoRastreio||null});
+    }catch(e){resultados.push({numero:row.numero,fornecedor:row.fornecedor,ok:false,erro:e.message})}
+  }
+  res.json({total:rows.length,resultados});
+}catch(e){next(e)}});
+router.get('/admin/status',admin,async(req,res,next)=>{try{
+  const paisesDiretos=(process.env.PAISES_COM_ENVIO_DIRETO||'PT,ES,FR,DE,IT,NL,BE,AT,IE,SE,DK,FI,PL,CZ,RO,GB,US,CA,MX,BR,CL,AR,CO').split(',').map(x=>x.trim().toUpperCase()).filter(Boolean);
+  res.json({
+    stripe:!!process.env.STRIPE_SECRET_KEY,
+    appypay:!!(process.env.APPYPAY_ACCESS_TOKEN&&process.env.APPYPAY_PAYMENT_METHOD),
+    cj:!!process.env.CJ_API_KEY,
+    buckydrop:!!(process.env.BUCKYDROP_API_URL&&process.env.BUCKYDROP_APPCODE&&process.env.BUCKYDROP_APPSECRET),
+    agenteDeCarga:!!(process.env.AGENTE_NOME&&process.env.AGENTE_LINHA1&&process.env.AGENTE_CIDADE&&process.env.AGENTE_PAIS),
+    paisesDiretos
+  });
+}catch(e){next(e)}});
 
 router.get('/admin/assinaturas',admin,async(req,res,next)=>{try{const r=await query('SELECT * FROM assinaturas ORDER BY criado_em DESC');res.json(r.rows)}catch(e){next(e)}});
 

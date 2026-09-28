@@ -264,13 +264,14 @@ CREATE INDEX idx_pedido_itens_produto ON pedido_itens(produto_id);
 -- ---------------------------------------------------------------------
 CREATE TABLE pedido_pagamentos (
   pedido_id               BIGINT PRIMARY KEY REFERENCES pedidos(id) ON DELETE CASCADE,
-  metodo                  VARCHAR(20) NOT NULL CHECK (metodo IN ('stripe', 'paypal', 'appypay')),
+  metodo                  VARCHAR(20) NOT NULL CHECK (metodo IN ('stripe', 'paypal', 'appypay', 'manual')),
   estado                  VARCHAR(20) NOT NULL DEFAULT 'pendente' CHECK (estado IN (
                              'pendente', 'pago', 'falhado', 'reembolsado'
                            )),
   id_cobranca             VARCHAR(120),        -- ID gerado ao criar a cobrança/sessão
   id_cobranca_confirmada  VARCHAR(120),        -- ID devolvido pelo webhook de confirmação
   url_checkout            TEXT,                -- para Stripe/PayPal
+  nota                    TEXT,                -- referência/instrução de pagamento manual (transferência, etc.)
   atualizado_em           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -682,6 +683,34 @@ BEGIN
     ALTER TABLE produto_variantes
       ADD CONSTRAINT produto_variantes_margem_alvo_pct_check
       CHECK (margem_alvo_pct IS NULL OR margem_alvo_pct >= 0);
+  END IF;
+END $$;
+
+-- ============================================================
+-- 11. PAGAMENTO MANUAL (fallback enquanto Stripe/AppyPay não estão
+-- configurados com chaves reais — permite o checkout completar-se
+-- na mesma, com o pedido em 'pendente' até a equipa confirmar).
+-- ============================================================
+ALTER TABLE pedido_pagamentos ADD COLUMN IF NOT EXISTS nota TEXT;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'pedido_pagamentos_metodo_check'
+      AND conrelid = 'pedido_pagamentos'::regclass
+      AND pg_get_constraintdef(oid) NOT ILIKE '%manual%'
+  ) THEN
+    ALTER TABLE pedido_pagamentos DROP CONSTRAINT pedido_pagamentos_metodo_check;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'pedido_pagamentos_metodo_check'
+      AND conrelid = 'pedido_pagamentos'::regclass
+  ) THEN
+    ALTER TABLE pedido_pagamentos
+      ADD CONSTRAINT pedido_pagamentos_metodo_check
+      CHECK (metodo IN ('stripe', 'paypal', 'appypay', 'manual'));
   END IF;
 END $$;
 
