@@ -1,75 +1,102 @@
+envVarGroups:
+  - name: lumina-cron-shared
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SSL
+        value: "true"
+      - key: CRON_SECRET
+        sync: false
 services:
   - type: web
     name: lumina-api
     runtime: node
-    plan: free
-    buildCommand: npm install
+    plan: starter
+    buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
+      - key: DATABASE_URL
+        sync: false
       - key: DATABASE_SSL
         value: "true"
       - key: JWT_SECRET
         sync: false
-      - key: JWT_EXPIRES_IN
-        value: 7d
-      - key: DB_POOL_MAX
-        value: "10"
-      - key: DATABASE_URL
+      - key: TOTP_ENCRYPTION_KEY
+        sync: false
+      - key: CRON_SECRET
         sync: false
       - key: ORIGENS_PERMITIDAS
         sync: false
       - key: FRONTEND_URL
         sync: false
-      - key: STRIPE_SECRET_KEY
+      - key: ADMIN_URL
         sync: false
-      - key: STRIPE_WEBHOOK_SECRET
+      - key: PORTES_PRAZO_HORAS
+        value: "72"
+      - key: PORTES_SLA_HORAS
+        value: "12"
+      - key: DEVOLUCAO_PRAZO_DIAS
+        value: "14"
+      - key: KITS_ATIVOS
+        value: "false"
+      - key: CJ_ENVIO_VALIDADO
+        value: "false"
+      - key: BACKEND_PUBLIC_URL
         sync: false
-      - key: APPYPAY_API_URL
+      - key: SENTRY_DSN
         sync: false
-      - key: APPYPAY_ACCESS_TOKEN
+      - key: ADMIN_NOME
         sync: false
-      - key: APPYPAY_PAYMENT_METHOD
+      - key: ADMIN_EMAIL
         sync: false
-      - key: APPYPAY_WEBHOOK_SECRET
+      - key: ADMIN_PASSWORD
         sync: false
-      - key: CJ_TRACKING_WEBHOOK_SECRET
+      - key: SUPABASE_URL
         sync: false
-      - key: BUCKYDROP_TRACKING_WEBHOOK_SECRET
+      - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-      - key: CJ_API_KEY
+      - key: SUPABASE_STORAGE_BUCKET
         sync: false
-      - key: CJ_LOGISTIC_NAME
+      - key: SUPABASE_COMPROVATIVOS_BUCKET
         sync: false
-      - key: CJ_FROM_COUNTRY_CODE
-        value: CN
-      - key: CJ_SYNC_MARGIN_PCT
-        value: "60"
-      - key: CJ_TOKEN_CACHE_DAYS
-        value: "7"
-      - key: BUCKYDROP_API_URL
+      - key: RESEND_API_KEY
         sync: false
-      - key: BUCKYDROP_APPCODE
+      - key: EMAIL_FROM
         sync: false
-      - key: BUCKYDROP_APPSECRET
+      - key: EMAIL_REPLY_TO
         sync: false
-      - key: BUCKYDROP_ORDER_PATH
+      - key: STORE_ORDER_NOTIFICATION_EMAIL
         sync: false
-      - key: BUCKYDROP_TRACK_PATH
+      - key: PAGAMENTO_METODOS_ATIVOS
         sync: false
-      - key: EXCHANGE_RATE_API_URL
+      - key: PAGAMENTO_PRAZO_HORAS
         sync: false
-      - key: EXCHANGE_RATE_API_KEY
+      - key: PAGAMENTO_TITULAR
         sync: false
-      - key: EXCHANGE_RATE_USD_EUR_URL
-        value: https://api.frankfurter.app/latest?from=USD&to=EUR
+      - key: PAGAMENTO_BANCO
+        sync: false
+      - key: PAGAMENTO_IBAN
+        sync: false
+      - key: PAGAMENTO_SWIFT
+        sync: false
+      - key: PAGAMENTO_MULTICAIXA_ENTIDADE
+        sync: false
+      - key: PAGAMENTO_MULTICAIXA_TELEFONE
+        sync: false
+      - key: PAGAMENTO_INSTRUCOES_EXTRA
+        sync: false
       - key: AGENTE_NOME
         sync: false
       - key: AGENTE_LINHA1
         sync: false
+      - key: AGENTE_LINHA2
+        sync: false
       - key: AGENTE_CIDADE
+        sync: false
+      - key: AGENTE_PROVINCIA
         sync: false
       - key: AGENTE_CODIGO_POSTAL
         sync: false
@@ -77,13 +104,101 @@ services:
         sync: false
       - key: AGENTE_TELEFONE
         sync: false
+      - key: AGENTE_EMAIL
+        sync: false
       - key: AGENTE_REFERENCIA
-        value: LUMINA
+        sync: false
       - key: PAISES_COM_ENVIO_DIRETO
-        value: PT,ES,FR,DE,IT,NL,BE,AT,IE,SE,DK,FI,PL,CZ,RO,GB,US,CA,MX,BR,CL,AR,CO
-      - key: SUPABASE_URL
         sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
+      - key: CJ_API_KEY
         sync: false
-      - key: SUPABASE_STORAGE_BUCKET
-        value: product-images
+      - key: CJ_LOGISTIC_NAME
+        sync: false
+      - key: CJ_FROM_COUNTRY_CODE
+        sync: false
+      - key: CJ_TRACKING_WEBHOOK_SECRET
+        sync: false
+      - key: CJ_SYNC_MARGIN_PCT
+        sync: false
+      - key: BUCKYDROP_API_URL
+        sync: false
+      - key: BUCKYDROP_APPCODE
+        sync: false
+      - key: BUCKYDROP_APPSECRET
+        sync: false
+      - key: BUCKYDROP_FREIGHT_PATH
+        sync: false
+      - key: BUCKYDROP_ORDER_PATH
+        sync: false
+      - key: BUCKYDROP_TRACK_PATH
+        sync: false
+      - key: BUCKYDROP_TRACKING_WEBHOOK_SECRET
+        sync: false
+      - key: LUMINA_SHIPPING_RATES_JSON
+        sync: false
+      - key: ENVIO_AUTOMATICO_FORNECEDOR
+        value: "false"
+      - key: EMPRESA_DENOMINACAO
+        sync: false
+      - key: EMPRESA_NIF
+        sync: false
+      - key: EMPRESA_MORADA
+        sync: false
+      - key: EMPRESA_EMAIL
+        sync: false
+      - key: EMPRESA_TELEFONE
+        sync: false
+      - key: EMPRESA_REPRESENTANTE
+        sync: false
+      - key: EMPRESA_HORARIO
+        sync: false
+      - key: EMPRESA_LIVRO_RECLAMACOES
+        sync: false
+      - key: EMPRESA_IVA
+        sync: false
+  - type: cron
+    name: lumina-expirar-pedidos
+    runtime: node
+    plan: starter
+    envVarGroups:
+      - lumina-cron-shared
+    schedule: '*/10 * * * *'
+    buildCommand: npm ci
+    startCommand: npm run jobs:expirar-pedidos
+    envVars:
+      - key: NODE_ENV
+        value: production
+  - type: cron
+    name: lumina-sincronizar-tracking
+    runtime: node
+    plan: starter
+    envVarGroups:
+      - lumina-cron-shared
+    schedule: '*/30 * * * *'
+    buildCommand: npm ci
+    startCommand: npm run jobs:sync-tracking
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CJ_API_KEY
+        sync: false
+      - key: CJ_FROM_COUNTRY_CODE
+        sync: false
+  - type: cron
+    name: lumina-lembretes-pagamento
+    runtime: node
+    plan: starter
+    envVarGroups:
+      - lumina-cron-shared
+    schedule: '0 * * * *'
+    buildCommand: npm ci
+    startCommand: npm run jobs:lembretes-pagamento
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: EMAIL_REPLY_TO
+        sync: false

@@ -7,9 +7,23 @@
   "scripts": {
     "start": "node server.js",
     "seed:admin": "node scripts/seed-admin.js",
-    "test": "node --check server.js && node --check migrate.js",
+    "test": "node scripts/check-syntax.js && node scripts/check-xss.js",
     "migrate": "node migrate.js",
-    "migrate:update": "MIGRATION_FILE=2026-09-28-integracao-completa.sql node migrate.js"
+    "migrate:update": "MIGRATION_FILE=2026-09-28-integracao-completa.sql node migrate.js",
+    "migrate:manual-checkout": "MIGRATION_FILE=2026-10-10-checkout-manual-seguranca.sql node migrate.js",
+    "test:phase": "node scripts/test-phase.js",
+    "test:integrations": "node scripts/test-integrations.js",
+    "check:launch": "node scripts/check-launch.js",
+    "check:secrets": "node scripts/check-secrets.js",
+    "test:unit": "node --test tests/*.test.js",
+    "test:db": "node scripts/test-postgres.js",
+    "jobs:expirar-pedidos": "node scripts/jobs/expirar-pedidos.js",
+    "jobs:sync-tracking": "node scripts/jobs/sincronizar-tracking.js",
+    "jobs:lembretes-pagamento": "node scripts/jobs/lembretes-pagamento.js",
+    "test:e2e": "node scripts/test-e2e.js",
+    "test:load": "node scripts/test-load.js",
+    "check:xss": "node scripts/check-xss.js",
+    "smoke": "node scripts/smoke-test.js"
   },
   "engines": {
     "node": ">=20"
@@ -22,7 +36,6 @@
     "helmet": "^8.1.0",
     "multer": "^2.0.2",
     "jsonwebtoken": "^9.0.3",
-    "pg": "^8.16.3",
-    "stripe": "^18.5.0"
+    "pg": "^8.16.3"
   }
 }

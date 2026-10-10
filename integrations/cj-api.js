@@ -8,7 +8,8 @@ async function getToken(){
 }
 async function req(path,opts={}){const t=await getToken(); const r=await fetch(BASE+path,{...opts,headers:{'CJ-Access-Token':t,'Content-Type':'application/json',...(opts.headers||{})}}); const d=await r.json().catch(()=>({})); if(!r.ok||d.result===false) throw new Error(d.message||`CJ respondeu ${r.status}.`); return d;}
 async function criarPedido({pedidoId,itens,moradaEntrega,logisticName}){
- const body={orderNumber:String(pedidoId),shippingZip:moradaEntrega.codigoPostal||'',shippingCountryCode:moradaEntrega.pais,shippingCountry:moradaEntrega.pais,shippingProvince:moradaEntrega.provincia||'',shippingCity:moradaEntrega.cidade,shippingAddress:moradaEntrega.linha1,shippingCustomerName:moradaEntrega.nome||'Cliente Lúmina',email:moradaEntrega.email||'',shippingPhone:moradaEntrega.telefone||'',payType:3,logisticName:logisticName||process.env.CJ_LOGISTIC_NAME||undefined,fromCountryCode:process.env.CJ_FROM_COUNTRY_CODE||'CN',platform:'Api',shopLogisticsType:2,orderFlow:1,products:itens.map(i=>({vid:i.idFornecedorVariante||i.skuFornecedor||i.idFornecedor,quantity:i.quantidade,storeLineItemId:String(i.produtoId)}))};
+ const origem=String(process.env.CJ_FROM_COUNTRY_CODE||'').trim();const logistica=String(logisticName||process.env.CJ_LOGISTIC_NAME||'').trim();if(!origem)throw new Error('CJ_FROM_COUNTRY_CODE não configurado; envio bloqueado.');if(!logistica)throw new Error('CJ_LOGISTIC_NAME não configurado; envio bloqueado.');if(!moradaEntrega.nome||!moradaEntrega.pais||!moradaEntrega.cidade||!moradaEntrega.linha1||!moradaEntrega.telefone)throw new Error('Morada de expedição incompleta; envio bloqueado.');if(itens.some(i=>!i.idFornecedorVariante||!Number.isInteger(Number(i.quantidade))||Number(i.quantidade)<1))throw new Error('Variant ID ou quantidade inválida; envio bloqueado.');
+ const body={orderNumber:String(pedidoId),shippingZip:moradaEntrega.codigoPostal||'',shippingCountryCode:moradaEntrega.pais,shippingCountry:moradaEntrega.pais,shippingProvince:moradaEntrega.provincia||'',shippingCity:moradaEntrega.cidade,shippingAddress:moradaEntrega.linha1,shippingCustomerName:moradaEntrega.nome,email:moradaEntrega.email||'',shippingPhone:moradaEntrega.telefone,payType:3,logisticName:logistica,fromCountryCode:origem,platform:'Api',shopLogisticsType:2,orderFlow:1,products:itens.map(i=>({vid:i.idFornecedorVariante,quantity:i.quantidade,storeLineItemId:String(i.produtoId)}))};
  const d=await req('/shopping/order/createOrderV3',{method:'POST',body:JSON.stringify(body)}); const data=d.data||{}; return {idPedidoFornecedor:data.orderId||data.cjOrderId||data.orderNum,prazoEstimadoDias:null,dados:data};
 }
 function extrairIdProduto(valor){
@@ -40,11 +41,11 @@ async function consultarEstoque(idProdutoFornecedor){const d=await req(`/product
 async function consultarRastreio(idPedidoFornecedor){const d=await req(`/logistic/trackInfo?orderId=${encodeURIComponent(idPedidoFornecedor)}`);const data=d.data||{};return{idPedidoFornecedor,codigoRastreio:data.trackNumber||data.trackingNumber||null,estado:data.status||null,dados:data};}
 
 async function calcularFrete({destino, produtos, zip, taxId}){
- const start=process.env.CJ_FROM_COUNTRY_CODE||'CN';
+ const start=String(process.env.CJ_FROM_COUNTRY_CODE||'').trim();if(!start)throw new Error('CJ_FROM_COUNTRY_CODE não configurado; cotação bloqueada.');
  const payload={startCountryCode:start,endCountryCode:String(destino).toUpperCase(),zip:zip||undefined,taxId:taxId||undefined,products:produtos.map(p=>({quantity:Number(p.quantity)||1,vid:String(p.vid)}))};
  const d=await req('/logistic/freightCalculate',{method:'POST',body:JSON.stringify(payload)});
- const rows=Array.isArray(d.data)?d.data:[];
- return rows.map(x=>({nome:x.logisticName||'Método de envio',custoUSD:Number(x.logisticPrice??x.totalPostageFee??0),prazo:x.logisticAging||null,taxesUSD:x.taxesFee==null?null:Number(x.taxesFee),desalfandegamentoUSD:x.clearanceOperationFee==null?null:Number(x.clearanceOperationFee),totalUSD:x.totalPostageFee==null?null:Number(x.totalPostageFee)}));
+ const rows=Array.isArray(d.data)?d.data:(Array.isArray(d.data?.freightTrialList)?d.data.freightTrialList:[]);
+ return rows.map(x=>({nome:x.logisticName||x.enName||'Método de envio',custoUSD:Number(x.logisticPrice??x.shippingCost??x.totalPostageFee??0),prazo:x.logisticAging||x.deliveryTime||null,taxesUSD:x.taxesFee==null?null:Number(x.taxesFee),desalfandegamentoUSD:x.clearanceOperationFee==null?null:Number(x.clearanceOperationFee),totalUSD:x.totalPostageFee==null?Number(x.logisticPrice??x.shippingCost??0):Number(x.totalPostageFee)})).filter(x=>Number.isFinite(x.totalUSD)&&x.totalUSD>=0);
 }
 async function consultarAvaliacoes(pid,{page=1,pageSize=10,score}={}){
  let q=`?pid=${encodeURIComponent(pid)}&pageNum=${page}&pageSize=${pageSize}`; if(score) q+=`&score=${encodeURIComponent(score)}`;

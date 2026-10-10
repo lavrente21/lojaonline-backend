@@ -1,17 +1,11 @@
-const jwt = require('jsonwebtoken');
-const SEGREDO = process.env.JWT_SECRET;
-if (!SEGREDO) throw new Error('JWT_SECRET não configurado.');
-function gerarToken(payload) { return jwt.sign(payload, SEGREDO, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }); }
-function exigirAutenticacao(tipoEsperado) {
-  return (req, res, next) => {
-    const token = (req.headers.authorization || '').startsWith('Bearer ') ? req.headers.authorization.slice(7) : null;
-    if (!token) return res.status(401).json({ erro: 'Token em falta.' });
-    try {
-      const dados = jwt.verify(token, SEGREDO);
-      if (tipoEsperado && dados.tipo !== tipoEsperado) return res.status(403).json({ erro: 'Sem permissão.' });
-      req.utilizador = dados; next();
-    } catch { return res.status(401).json({ erro: 'Token inválido ou expirado.' }); }
-  };
-}
-function tentarAutenticacao(req,res,next){const token=(req.headers.authorization||'').startsWith('Bearer ')?req.headers.authorization.slice(7):null;if(!token)return next();try{const dados=jwt.verify(token,SEGREDO);req.utilizador=dados;}catch{}next();}
-module.exports = { gerarToken, exigirAutenticacao, tentarAutenticacao };
+'use strict';
+const jwt=require('jsonwebtoken');
+const {query}=require('../config/db');
+const SEGREDO=process.env.JWT_SECRET;
+if(!SEGREDO)throw new Error('JWT_SECRET não configurado.');
+function gerarToken(payload,expiresIn){return jwt.sign(payload,SEGREDO,{expiresIn:expiresIn|| (payload.tipo==='admin'?'2h':'12h')});}
+function papelPermitido(req,papel){if(!papel)return false;if(papel==='dono')return true;const path=String(req.baseUrl||'')+String(req.path||'');const method=String(req.method||'GET').toUpperCase();if(papel==='suporte')return /contactos|devolucoes|avaliacoes|newsletter\/subscritores|rastrear/i.test(path)&&['GET','PUT','PATCH'].includes(method);if(papel==='gestor')return !/admins|configuracoes|pagamentos\/.+marcar-pago|newsletter\/campanhas\/.+enviar/i.test(path);return false;}
+function exigirPapel(...papeis){return(req,res,next)=>{if(!req.utilizador||req.utilizador.tipo!=='admin')return res.status(403).json({erro:'Sem permissão.'});if(!papeis.includes(req.utilizador.papel))return res.status(403).json({erro:'O seu papel administrativo não permite esta operação.'});next();};}
+function exigirAutenticacao(tipoEsperado){return async(req,res,next)=>{const token=(req.headers.authorization||'').startsWith('Bearer ')?req.headers.authorization.slice(7):null;if(!token)return res.status(401).json({erro:'Token em falta.'});try{const dados=jwt.verify(token,SEGREDO);if(tipoEsperado&&dados.tipo!==tipoEsperado)return res.status(403).json({erro:'Sem permissão.'});if(!Number.isInteger(Number(dados.ver)))return res.status(401).json({erro:'Sessão antiga ou revogada. Inicie sessão novamente.'});const table=dados.tipo==='admin'?'admins':'clientes';const r=await query(`SELECT token_version${dados.tipo==='admin'?',totp_ativo':''} FROM ${table} WHERE id=$1`,[dados.id]);if(!r.rowCount||Number(r.rows[0].token_version)!==Number(dados.ver))return res.status(401).json({erro:'Sessão revogada. Inicie sessão novamente.'});if(dados.tipo==='admin'&&!r.rows[0].totp_ativo)return res.status(403).json({erro:'A configuração de autenticação de dois fatores é obrigatória antes de utilizar o painel.'});req.utilizador=dados;if(tipoEsperado==='admin'&&!papelPermitido(req,dados.papel))return res.status(403).json({erro:'O seu papel administrativo não permite esta operação.'});next();}catch(e){if(e.status)return res.status(e.status).json({erro:e.message});return res.status(401).json({erro:'Token inválido, expirado ou sessão indisponível.'});}};}
+async function tentarAutenticacao(req,res,next){const token=(req.headers.authorization||'').startsWith('Bearer ')?req.headers.authorization.slice(7):null;if(!token)return next();try{const dados=jwt.verify(token,SEGREDO);if(Number.isInteger(Number(dados.ver))){const table=dados.tipo==='admin'?'admins':'clientes';const r=await query(`SELECT token_version${dados.tipo==='admin'?',totp_ativo':''} FROM ${table} WHERE id=$1`,[dados.id]);if(r.rowCount&&Number(r.rows[0].token_version)===Number(dados.ver)&&(dados.tipo!=='admin'||r.rows[0].totp_ativo))req.utilizador=dados;}}catch{}next();}
+module.exports={gerarToken,exigirAutenticacao,tentarAutenticacao,exigirPapel};

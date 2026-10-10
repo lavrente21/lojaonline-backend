@@ -1,28 +1,73 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { query } = require('../config/db');
+const { query, transaction } = require('../config/db');
 const { gerarToken, exigirAutenticacao } = require('../middleware/auth');
+const {rateLimitPersistente}=require('../middleware/rate-limit-persistente');
+const totp=require('../services/totp');
 const router = express.Router();
 const normalizar = e => String(e || '').trim().toLowerCase();
 
-router.post('/clientes/registar', async (req,res,next)=>{ try {
+const tentativasLogin = new Map();
+function limitarLogin(req,res,next){
+ const chave=`${req.ip||req.socket.remoteAddress}:${req.path}`; const agora=Date.now(); let x=tentativasLogin.get(chave);
+ if(x&&x.bloqueadoAte>agora)return res.status(429).json({erro:'Demasiadas tentativas. Aguarde 15 minutos antes de tentar novamente.'});
+ if(!x||agora-x.inicio>15*60*1000){x={inicio:agora,erros:0,bloqueadoAte:0};tentativasLogin.set(chave,x)}
+ req._loginRate={chave,x}; next();
+}
+function registarFalhaLogin(req){const a=req._loginRate;if(!a)return;a.x.erros++;if(a.x.erros>=10)a.x.bloqueadoAte=Date.now()+15*60*1000;tentativasLogin.set(a.chave,a.x)}
+function registarSucessoLogin(req){const a=req._loginRate;if(a)tentativasLogin.delete(a.chave)}
+
+
+router.post('/clientes/registar', rateLimitPersistente({nome:'cliente-registo',limite:8,janelaSegundos:3600}), async (req,res,next)=>{ try {
   const { nome, email, palavraPasse, telefone } = req.body;
   if(!nome || !email || !palavraPasse || palavraPasse.length < 8) return res.status(400).json({erro:'Nome, e-mail e palavra-passe (mínimo 8 caracteres) são obrigatórios.'});
   const e=normalizar(email); const existe=await query('SELECT id FROM clientes WHERE email=$1',[e]); if(existe.rowCount) return res.status(409).json({erro:'Já existe uma conta com este e-mail.'});
   const hash=await bcrypt.hash(palavraPasse,12); const r=await query('INSERT INTO clientes(nome,email,password_hash,telefone) VALUES($1,$2,$3,$4) RETURNING id,nome,email,telefone',[nome.trim(),e,hash,telefone||null]);
-  const c=r.rows[0]; res.status(201).json({token:gerarToken({id:c.id,tipo:'cliente'}),cliente:c});
+  const c=r.rows[0]; res.status(201).json({token:gerarToken({id:c.id,tipo:'cliente',ver:Number(c.token_version||0)}),cliente:c});
  } catch(e){next(e)} });
 
-router.post('/clientes/login', async(req,res,next)=>{try{
- const e=normalizar(req.body.email); const r=await query('SELECT id,nome,email,telefone,password_hash FROM clientes WHERE email=$1',[e]); const c=r.rows[0];
- if(!c || !(await bcrypt.compare(req.body.palavraPasse||'',c.password_hash))) return res.status(401).json({erro:'E-mail ou palavra-passe incorretos.'});
- delete c.password_hash; res.json({token:gerarToken({id:c.id,tipo:'cliente'}),cliente:c});
+router.post('/clientes/login', rateLimitPersistente({nome:'cliente-login',limite:10,janelaSegundos:900}), limitarLogin, async(req,res,next)=>{try{
+ const e=normalizar(req.body.email); const r=await query('SELECT id,nome,email,telefone,password_hash,token_version FROM clientes WHERE email=$1',[e]); const c=r.rows[0];
+ if(!c || !(await bcrypt.compare(req.body.palavraPasse||'',c.password_hash))){registarFalhaLogin(req);return res.status(401).json({erro:'E-mail ou palavra-passe incorretos.'});} registarSucessoLogin(req);
+ delete c.password_hash; res.json({token:gerarToken({id:c.id,tipo:'cliente',ver:Number(c.token_version||0)}),cliente:c});
 }catch(e){next(e)}});
 
-router.post('/admin/login', async(req,res,next)=>{try{
- const e=normalizar(req.body.email); const r=await query('SELECT id,nome,email,papel,password_hash FROM admins WHERE email=$1',[e]); const a=r.rows[0];
- if(!a || !(await bcrypt.compare(req.body.palavraPasse||'',a.password_hash))) return res.status(401).json({erro:'E-mail ou palavra-passe incorretos.'});
- delete a.password_hash; res.json({token:gerarToken({id:a.id,tipo:'admin',papel:a.papel}),admin:a});
+router.post('/admin/login', rateLimitPersistente({nome:'admin-login',limite:8,janelaSegundos:900}), limitarLogin, async(req,res,next)=>{try{
+ const e=normalizar(req.body.email); const r=await query('SELECT id,nome,email,papel,password_hash,token_version,totp_ativo,totp_secret_enc,totp_recuperacao_hashes FROM admins WHERE email=$1',[e]); const a=r.rows[0];
+ if(!a || !(await bcrypt.compare(req.body.palavraPasse||'',a.password_hash))){registarFalhaLogin(req);return res.status(401).json({erro:'E-mail ou palavra-passe incorretos.'});}
+ if(!a.totp_ativo)return res.status(403).json({erro:'Configure a autenticação de dois fatores antes de aceder ao painel.',codigo:'TOTP_SETUP_REQUIRED'});
+ let segredo;try{segredo=totp.decifrar(a.totp_secret_enc);}catch{return res.status(503).json({erro:'A configuração 2FA não pode ser validada. Contacte o administrador técnico.'});}
+ if(!totp.verificarTOTP(segredo,req.body.codigo2FA)){const hash=require('crypto').createHash('sha256').update(String(req.body.codigo2FA||'')).digest('hex');const hashes=Array.isArray(a.totp_recuperacao_hashes)?a.totp_recuperacao_hashes:[];if(!hashes.includes(hash))return res.status(401).json({erro:'Código de autenticação de dois fatores inválido.'});await query('UPDATE admins SET totp_recuperacao_hashes=array_remove(totp_recuperacao_hashes,$1) WHERE id=$2',[hash,a.id]);}
+ registarSucessoLogin(req);delete a.password_hash;delete a.totp_secret_enc;delete a.totp_ativo;delete a.totp_recuperacao_hashes;res.json({token:gerarToken({id:a.id,tipo:'admin',papel:a.papel,ver:Number(a.token_version||0)}),admin:a});
+}catch(e){next(e)}});
+
+
+router.post('/admin/2fa/setup',rateLimitPersistente({nome:'admin-2fa-setup',limite:5,janelaSegundos:3600}),async(req,res,next)=>{try{const email=normalizar(req.body.email);const r=await query('SELECT id,nome,password_hash,totp_ativo FROM admins WHERE email=$1',[email]);const a=r.rows[0];if(!a||!(await bcrypt.compare(String(req.body.palavraPasse||''),a.password_hash)))return res.status(401).json({erro:'Credenciais inválidas.'});if(a.totp_ativo)return res.status(409).json({erro:'A autenticação de dois fatores já está ativa.'});const secret=totp.gerarSegredo();await query('UPDATE admins SET totp_secret_enc=$1,totp_setup_em=now() WHERE id=$2',[totp.cifrar(secret),a.id]);const issuer='Lumina';const uri=`otpauth://totp/${encodeURIComponent(issuer+':'+email)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;res.setHeader('Cache-Control','no-store');res.json({secret,otpauthUri:uri,mensagem:'Guarde a chave numa aplicação autenticadora. Confirme com o endpoint /admin/2fa/confirmar; a chave só é devolvida durante esta configuração.'});}catch(e){next(e)}});
+router.post('/admin/2fa/confirmar',rateLimitPersistente({nome:'admin-2fa-confirmar',limite:10,janelaSegundos:900}),async(req,res,next)=>{try{const email=normalizar(req.body.email);const r=await query('SELECT id,password_hash,totp_secret_enc,totp_ativo FROM admins WHERE email=$1',[email]);const a=r.rows[0];if(!a||!(await bcrypt.compare(String(req.body.palavraPasse||''),a.password_hash)))return res.status(401).json({erro:'Credenciais inválidas.'});if(a.totp_ativo)return res.status(409).json({erro:'A autenticação de dois fatores já está ativa.'});if(!a.totp_secret_enc)return res.status(409).json({erro:'Inicie primeiro a configuração 2FA.'});const secret=totp.decifrar(a.totp_secret_enc);if(!totp.verificarTOTP(secret,req.body.codigo))return res.status(400).json({erro:'Código TOTP inválido.'});const codes=Array.from({length:10},()=>require('crypto').randomBytes(8).toString('hex'));const hashes=codes.map(c=>require('crypto').createHash('sha256').update(c).digest('hex'));await query('UPDATE admins SET totp_ativo=true,totp_setup_em=COALESCE(totp_setup_em,now()),totp_recuperacao_hashes=$1,token_version=token_version+1 WHERE id=$2',[hashes,a.id]);res.setHeader('Cache-Control','no-store');res.json({sucesso:true,codigosRecuperacao:codes,mensagem:'Guarde estes códigos offline. São apresentados uma única vez.'});}catch(e){next(e)}});
+router.post('/admin/logout-global',exigirAutenticacao('admin'),async(req,res,next)=>{try{await query('UPDATE admins SET token_version=token_version+1 WHERE id=$1',[req.utilizador.id]);res.json({sucesso:true,mensagem:'Todas as sessões administrativas foram revogadas.'});}catch(e){next(e)}});
+
+// Pedido de recuperação: resposta idêntica exista ou não a conta, para evitar enumeração.
+router.post('/clientes/recuperar-senha', rateLimitPersistente({nome:'cliente-recuperar-senha',limite:5,janelaSegundos:3600}), async(req,res,next)=>{try{
+ const crypto=require('crypto'); const email=normalizar(req.body.email); if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return res.status(400).json({erro:'Indique um e-mail válido.'});
+ const r=await query('SELECT id,nome,email FROM clientes WHERE email=$1',[email]);
+ if(r.rowCount){const raw=crypto.randomBytes(32).toString('hex'),hash=crypto.createHash('sha256').update(raw).digest('hex');
+ await query('UPDATE recuperacao_senhas SET usado_em=COALESCE(usado_em,now()) WHERE email=$1 AND usado_em IS NULL',[email]);
+ await query("INSERT INTO recuperacao_senhas(cliente_id,email,token_hash,expira_em) VALUES($1,$2,$3,now()+interval '30 minutes')",[r.rows[0].id,email,hash]);
+ const base=(process.env.FRONTEND_URL||'https://aolumina.netlify.app').replace(/\/$/,''); const link=`${base}/conta/recuperar-senha.html?token=${raw}`;
+ try{await require('../integrations/email').enviarEmail({to:email,subject:'Recuperação da palavra-passe — Lúmina',html:`<p>Olá ${String(r.rows[0].nome).replace(/[&<>"']/g,'')}</p><p>Para criar uma nova palavra-passe, abra este link (válido por 30 minutos):</p><p><a href="${link}">Recuperar palavra-passe</a></p><p>Se não pediu esta alteração, ignore este e-mail.</p>`,text:`Recupere a palavra-passe em ${link}. O link expira em 30 minutos.`});}catch(e){console.error('[recuperacao-senha]',e.message)}
+ }
+ res.json({sucesso:true,mensagem:'Se existir uma conta associada a este e-mail, receberá instruções para recuperar a palavra-passe.'});
+}catch(e){next(e)}});
+router.post('/clientes/redefinir-senha', rateLimitPersistente({nome:'cliente-redefinir-senha',limite:8,janelaSegundos:3600}), async(req,res,next)=>{try{
+ const crypto=require('crypto'); const token=String(req.body.token||''); const nova=String(req.body.palavraPasse||''); if(token.length<32||nova.length<8||nova.length>200)return res.status(400).json({erro:'Token ou palavra-passe inválidos. Use pelo menos 8 caracteres.'});
+ const hash=crypto.createHash('sha256').update(token).digest('hex'); const r=await query('SELECT id,cliente_id FROM recuperacao_senhas WHERE token_hash=$1 AND usado_em IS NULL AND expira_em>now()',[hash]); if(!r.rowCount)return res.status(400).json({erro:'Link inválido, usado ou expirado.'});
+ const ph=await bcrypt.hash(nova,12); await transaction(async client=>{await client.query('UPDATE clientes SET password_hash=$1,token_version=token_version+1 WHERE id=$2',[ph,r.rows[0].cliente_id]);await client.query('UPDATE recuperacao_senhas SET usado_em=now() WHERE id=$1',[r.rows[0].id]);});
+ res.json({sucesso:true,mensagem:'Palavra-passe alterada. Entre com a nova palavra-passe.'});
+}catch(e){next(e)}});
+router.put('/clientes/palavra-passe', rateLimitPersistente({nome:'cliente-alterar-senha',limite:5,janelaSegundos:3600}), exigirAutenticacao('cliente'), async(req,res,next)=>{try{
+ const atual=String(req.body.palavraPasseAtual||''),nova=String(req.body.novaPalavraPasse||''); if(nova.length<8||nova.length>200)return res.status(400).json({erro:'A nova palavra-passe deve ter entre 8 e 200 caracteres.'});
+ const r=await query('SELECT password_hash FROM clientes WHERE id=$1',[req.utilizador.id]); if(!r.rowCount||!(await bcrypt.compare(atual,r.rows[0].password_hash)))return res.status(401).json({erro:'Palavra-passe atual incorreta.'});
+ await query('UPDATE clientes SET password_hash=$1,token_version=token_version+1 WHERE id=$2',[await bcrypt.hash(nova,12),req.utilizador.id]);res.json({sucesso:true,mensagem:'Palavra-passe alterada.'});
 }catch(e){next(e)}});
 
 router.get('/clientes/me', exigirAutenticacao('cliente'), async(req,res,next)=>{try{const r=await query('SELECT id,nome,email,telefone,criado_em FROM clientes WHERE id=$1',[req.utilizador.id]);if(!r.rowCount)return res.status(404).json({erro:'Cliente não encontrado.'});res.json(r.rows[0]);}catch(e){next(e)}});
@@ -32,5 +77,7 @@ router.post('/clientes/enderecos', exigirAutenticacao('cliente'), async(req,res,
 router.put('/clientes/enderecos/:id', exigirAutenticacao('cliente'), async(req,res,next)=>{try{const allowed={rotulo:'rotulo',linha1:'linha1',linha2:'linha2',cidade:'cidade',codigoPostal:'codigo_postal',pais:'pais',telefone:'telefone',predefinido:'predefinido'};const sets=[],vals=[];for(const k of Object.keys(allowed))if(req.body[k]!==undefined){vals.push(k==='pais'?String(req.body[k]).toUpperCase():req.body[k]);sets.push(`${allowed[k]}=$${vals.length}`)}if(!sets.length)return res.status(400).json({erro:'Nenhuma alteração.'});vals.push(req.params.id,req.utilizador.id);const r=await query(`UPDATE clientes_enderecos SET ${sets.join(',')} WHERE id=$${vals.length-1} AND cliente_id=$${vals.length} RETURNING *`,vals);if(!r.rowCount)return res.status(404).json({erro:'Morada não encontrada.'});if(req.body.predefinido)await query('UPDATE clientes_enderecos SET predefinido=false WHERE cliente_id=$1 AND id<>$2',[req.utilizador.id,r.rows[0].id]);res.json(r.rows[0]);}catch(e){next(e)}});
 router.delete('/clientes/enderecos/:id', exigirAutenticacao('cliente'), async(req,res,next)=>{try{const r=await query('DELETE FROM clientes_enderecos WHERE id=$1 AND cliente_id=$2 RETURNING id',[req.params.id,req.utilizador.id]);if(!r.rowCount)return res.status(404).json({erro:'Morada não encontrada.'});res.json({sucesso:true});}catch(e){next(e)}});
 router.get('/clientes/assinaturas', exigirAutenticacao('cliente'), async(req,res,next)=>{try{const r=await query('SELECT * FROM assinaturas WHERE cliente_id=$1 ORDER BY criado_em DESC',[req.utilizador.id]);res.json(r.rows)}catch(e){next(e)}});
+router.post('/clientes/assinaturas', exigirAutenticacao('cliente'), async(req,res,next)=>{try{const produtoId=Number(req.body.produtoId),frequencia=String(req.body.frequencia||'mensal');if(!Number.isInteger(produtoId)||produtoId<1)return res.status(400).json({erro:'Produto inválido.'});if(!['semanal','mensal','bimestral','trimestral'].includes(frequencia))return res.status(400).json({erro:'Frequência inválida.'});if(req.body.consentimento!==true)return res.status(400).json({erro:'É necessário consentir expressamente com a subscrição.'});const p=(await query('SELECT id,nome,preco_venda_eur,ativo FROM produtos WHERE id=$1',[produtoId])).rows[0];if(!p||!p.ativo||Number(p.preco_venda_eur)<=0)return res.status(404).json({erro:'Produto indisponível para subscrição.'});const r=await query(`INSERT INTO assinaturas(cliente_id,produto_id,nome_produto,preco_eur,plano,frequencia,estado,consentimento_em) VALUES($1,$2,$3,$4,$5,$6,'pendente_pagamento',now()) RETURNING *`,[req.utilizador.id,p.id,p.nome,p.preco_venda_eur,frequencia,frequencia]);res.status(201).json({assinatura:r.rows[0],cobrancaRecorrenteAtiva:false,mensagem:'Pedido de subscrição registado. A cobrança recorrente só será ativada após configurar e validar um provedor de pagamentos recorrentes.'});}catch(e){next(e)}});
+router.patch('/clientes/assinaturas/:id/cancelar', exigirAutenticacao('cliente'), async(req,res,next)=>{try{const r=await query(`UPDATE assinaturas SET estado='cancelada',cancelada_em=now(),atualizado_em=now() WHERE id=$1 AND cliente_id=$2 AND estado IN ('ativa','pendente_pagamento') RETURNING *`,[req.params.id,req.utilizador.id]);if(!r.rowCount)return res.status(404).json({erro:'Subscrição não encontrada ou já cancelada.'});res.json({sucesso:true,assinatura:r.rows[0],mensagem:'Subscrição cancelada. Não existe cobrança recorrente ativa neste momento.'});}catch(e){next(e)}});
 
 module.exports=router;

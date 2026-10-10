@@ -191,6 +191,8 @@ CREATE TABLE pedidos (
   numero                      VARCHAR(20) NOT NULL UNIQUE
                                 DEFAULT ('LUM-' || nextval('pedidos_numero_seq')),
   cliente_id                  BIGINT REFERENCES clientes(id) ON DELETE SET NULL,
+  cliente_nome                VARCHAR(180),
+  cliente_email               VARCHAR(254),
 
   total_eur                   NUMERIC(10,2) NOT NULL CHECK (total_eur >= 0),
   frete_usd              NUMERIC(10,2),

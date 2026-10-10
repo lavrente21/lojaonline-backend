@@ -1,7 +1,6 @@
 const express=require('express');
 const {query,transaction}=require('../config/db');
 const {exigirAutenticacao}=require('../middleware/auth');
-const {fulfillPedido}=require('./webhooks');
 const cj=require('../integrations/cj-api');
 const bucky=require('../integrations/buckydrop-api');
 const router=express.Router();
@@ -31,7 +30,7 @@ router.get('/admin/devolucoes',admin,async(req,res,next)=>{try{const r=await que
 router.put('/admin/devolucoes/:id',admin,async(req,res,next)=>{try{const allowed=['solicitada','em_analise','aprovada','rejeitada','recebida','reembolsada','cancelada'];if(!allowed.includes(req.body.estado))return res.status(400).json({erro:'Estado inválido.'});const r=await query('UPDATE devolucoes SET estado=$1,atualizado_em=now() WHERE id=$2 RETURNING *',[req.body.estado,req.params.id]);if(!r.rowCount)return res.status(404).json({erro:'Devolução não encontrada.'});res.json(r.rows[0])}catch(e){next(e)}});
 
 router.get('/admin/contactos',admin,async(req,res,next)=>{try{const r=await query('SELECT * FROM contactos ORDER BY criado_em DESC');res.json(r.rows)}catch(e){next(e)}});
-router.put('/admin/contactos/:id',admin,async(req,res,next)=>{try{const allowed=['novo','em_atendimento','resolvido','arquivado'];if(!allowed.includes(req.body.estado))return res.status(400).json({erro:'Estado inválido.'});const r=await query('UPDATE contactos SET estado=$1,atualizado_em=now() WHERE id=$2 RETURNING *',[req.body.estado,req.params.id]);if(!r.rowCount)return res.status(404).json({erro:'Contacto não encontrado.'});res.json(r.rows[0])}catch(e){next(e)}});
+router.put('/admin/contactos/:id',admin,async(req,res,next)=>{try{const allowed=['novo','em_analise','respondido','fechado'];if(!allowed.includes(req.body.estado))return res.status(400).json({erro:'Estado inválido.'});const r=await query('UPDATE contactos SET estado=$1,atualizado_em=now() WHERE id=$2 RETURNING *',[req.body.estado,req.params.id]);if(!r.rowCount)return res.status(404).json({erro:'Contacto não encontrado.'});res.json(r.rows[0])}catch(e){next(e)}});
 
 router.get('/admin/newsletter',admin,async(req,res,next)=>{try{const r=await query(`SELECT COUNT(*) FILTER(WHERE ativo)::int total,COUNT(*)::int total_registos FROM newsletter_subscritores`);const env=await query('SELECT * FROM newsletter_campanhas ORDER BY criado_em DESC LIMIT 50');res.json({total:r.rows[0].total,totalRegistos:r.rows[0].total_registos,campanhas:env.rows})}catch(e){next(e)}});
 
@@ -47,15 +46,8 @@ router.get('/admin/pagamentos',admin,async(req,res,next)=>{try{
   const soma=(estado)=>r.rows.filter(x=>x.estado===estado).reduce((s,x)=>s+Number(x.total_eur||0),0);
   res.json({stats:{recebido_eur:soma('pago'),reembolsado_eur:soma('reembolsado'),pendente_eur:soma('pendente')},pedidos:r.rows});
 }catch(e){next(e)}});
-router.put('/admin/pagamentos/:pedidoId/marcar-pago',admin,async(req,res,next)=>{try{
-  const p=(await query('SELECT id,numero FROM pedidos WHERE numero=$1 OR id::text=$1',[String(req.params.pedidoId)])).rows[0];
-  if(!p)return res.status(404).json({erro:'Pedido não encontrado.'});
-  const nota=req.body?.nota?String(req.body.nota).trim().slice(0,500):null;
-  const r=await query(`UPDATE pedido_pagamentos SET estado='pago',id_cobranca_confirmada=COALESCE(id_cobranca_confirmada,'confirmado-manualmente'),nota=COALESCE($1,nota) WHERE pedido_id=$2 AND estado<>'pago' RETURNING *`,[nota,p.id]);
-  if(!r.rowCount)return res.status(409).json({erro:'Este pagamento já estava marcado como pago ou não existe.'});
-  await fulfillPedido(p.numero);
-  res.json({sucesso:true,pedido:p.numero,pagamento:r.rows[0]});
-}catch(e){next(e)}});
+// A confirmação de pagamento é implementada em POST /api/pagamentos/admin/:numero/confirmar; não existe ação legada que contorne auditoria.
+
 router.post('/admin/sincronizar-tracking',admin,async(req,res,next)=>{try{
   const rows=(await query(`SELECT pf.id,pf.fornecedor,pf.id_pedido_fornecedor,p.numero FROM pedido_fornecedores pf JOIN pedidos p ON p.id=pf.pedido_id WHERE pf.id_pedido_fornecedor IS NOT NULL AND pf.estado<>'entregue'`)).rows;
   const resultados=[];
@@ -71,16 +63,64 @@ router.post('/admin/sincronizar-tracking',admin,async(req,res,next)=>{try{
 }catch(e){next(e)}});
 router.get('/admin/status',admin,async(req,res,next)=>{try{
   const paisesDiretos=(process.env.PAISES_COM_ENVIO_DIRETO||'PT,ES,FR,DE,IT,NL,BE,AT,IE,SE,DK,FI,PL,CZ,RO,GB,US,CA,MX,BR,CL,AR,CO').split(',').map(x=>x.trim().toUpperCase()).filter(Boolean);
+  const metodos = String(process.env.PAGAMENTO_METODOS_ATIVOS || '').split(',').map(x => x.trim()).filter(Boolean);
+  const varsPagamento = {
+    transferencia: ['PAGAMENTO_TITULAR', 'PAGAMENTO_BANCO', 'PAGAMENTO_IBAN', 'PAGAMENTO_PRAZO_HORAS'],
+    deposito: ['PAGAMENTO_TITULAR', 'PAGAMENTO_BANCO', 'PAGAMENTO_PRAZO_HORAS'],
+    multicaixa: ['PAGAMENTO_MULTICAIXA_ENTIDADE', 'PAGAMENTO_MULTICAIXA_TELEFONE', 'PAGAMENTO_PRAZO_HORAS']
+  };
+  const faltamPagamento = [...new Set(metodos.flatMap(m => varsPagamento[m] || []))]
+    .filter(k => !String(process.env[k] || '').trim());
+  const varsAgente = ['AGENTE_NOME', 'AGENTE_LINHA1', 'AGENTE_CIDADE', 'AGENTE_PAIS', 'AGENTE_TELEFONE'];
+  const varsEmpresa = ['EMPRESA_DENOMINACAO', 'EMPRESA_NIF', 'EMPRESA_MORADA', 'EMPRESA_EMAIL', 'EMPRESA_TELEFONE', 'EMPRESA_REPRESENTANTE', 'EMPRESA_HORARIO', 'EMPRESA_LIVRO_RECLAMACOES', 'EMPRESA_IVA'];
+  res.setHeader('Cache-Control', 'no-store');
   res.json({
-    stripe:!!process.env.STRIPE_SECRET_KEY,
-    appypay:!!(process.env.APPYPAY_ACCESS_TOKEN&&process.env.APPYPAY_PAYMENT_METHOD),
-    cj:!!process.env.CJ_API_KEY,
-    buckydrop:!!(process.env.BUCKYDROP_API_URL&&process.env.BUCKYDROP_APPCODE&&process.env.BUCKYDROP_APPSECRET),
-    agenteDeCarga:!!(process.env.AGENTE_NOME&&process.env.AGENTE_LINHA1&&process.env.AGENTE_CIDADE&&process.env.AGENTE_PAIS),
+    stripe: false,
+    appypay: false,
+    cj: !!process.env.CJ_API_KEY,
+    resend: !!(process.env.RESEND_API_KEY && process.env.EMAIL_FROM),
+    buckydrop: !!(process.env.BUCKYDROP_API_URL && process.env.BUCKYDROP_APPCODE && process.env.BUCKYDROP_APPSECRET),
+    agente: varsAgente.every(k => !!String(process.env[k] || '').trim()),
+    iban: !!(process.env.PAGAMENTO_TITULAR && process.env.PAGAMENTO_BANCO && process.env.PAGAMENTO_IBAN),
+    transferencia: metodos.includes('transferencia') && !faltamPagamento.includes('PAGAMENTO_IBAN'),
+    multicaixa: metodos.includes('multicaixa') && !faltamPagamento.some(k => k.startsWith('PAGAMENTO_MULTICAIXA_')),
+    deposito: metodos.includes('deposito') && !faltamPagamento.some(k => ['PAGAMENTO_TITULAR','PAGAMENTO_BANCO'].includes(k)),
+    pagamentoConfigurado: metodos.length > 0 && faltamPagamento.length === 0,
+    pagamentoVariaveisEmFalta: faltamPagamento,
+    agenteVariaveisEmFalta: varsAgente.filter(k => !String(process.env[k] || '').trim()),
+    empresaConfigurada: varsEmpresa.every(k => !!String(process.env[k] || '').trim()),
+    empresaVariaveisEmFalta: varsEmpresa.filter(k => !String(process.env[k] || '').trim()),
     paisesDiretos
   });
 }catch(e){next(e)}});
 
+
+router.post('/newsletter/subscrever',(req,res)=>res.status(410).json({erro:'Endpoint legado desativado. Use /api/publico/newsletter, que exige confirmação por e-mail.'}));
+router.get('/newsletter/cancelar/:token',async(req,res,next)=>{try{const r=await query('UPDATE newsletter_subscritores SET ativo=false,cancelado_em=now(),atualizado_em=now() WHERE token_cancelamento=$1 RETURNING email',[req.params.token]);if(!r.rowCount)return res.status(404).send('Link inválido ou já utilizado.');res.type('html').send('<!doctype html><html lang="pt"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Subscrição cancelada — Lúmina</title><main><h1>Subscrição cancelada</h1><p>A sua subscrição da newsletter foi cancelada com sucesso.</p><p><a href="/">Voltar à loja</a></p></main></html>');}catch(e){next(e)}});
+router.post('/admin/newsletter/campanhas',admin,async(req,res,next)=>{try{const assunto=String(req.body.assunto||'').trim(),conteudo=String(req.body.conteudo||'').trim();if(!assunto||!conteudo)return res.status(400).json({erro:'Assunto e conteúdo são obrigatórios.'});const r=await query(`INSERT INTO newsletter_campanhas(assunto,conteudo,estado) VALUES($1,$2,'rascunho') RETURNING *`,[assunto,conteudo]);res.status(201).json(r.rows[0]);}catch(e){next(e)}});
+router.put('/admin/newsletter/campanhas/:id',admin,async(req,res,next)=>{try{const sets=[],v=[];for(const [k,col] of Object.entries({assunto:'assunto',conteudo:'conteudo'})){if(req.body[k]!==undefined){v.push(String(req.body[k]));sets.push(`${col}=$${v.length}`)}}if(!sets.length)return res.status(400).json({erro:'Nenhuma alteração.'});v.push(req.params.id);const r=await query(`UPDATE newsletter_campanhas SET ${sets.join(',')},atualizado_em=now() WHERE id=$${v.length} AND estado='rascunho' RETURNING *`,v);if(!r.rowCount)return res.status(404).json({erro:'Campanha não encontrada ou já enviada.'});res.json(r.rows[0]);}catch(e){next(e)}});
+router.post('/admin/newsletter/campanhas/:id/enviar',admin,async(req,res,next)=>{try{
+ const c=(await query(`SELECT * FROM newsletter_campanhas WHERE id=$1 AND estado='rascunho'`,[req.params.id])).rows[0];if(!c)return res.status(404).json({erro:'Campanha não encontrada ou já enviada.'});
+ if(!process.env.RESEND_API_KEY||!process.env.EMAIL_FROM)return res.status(503).json({erro:'Configure RESEND_API_KEY e EMAIL_FROM antes de enviar campanhas.'});
+ const subs=(await query('SELECT id,email,token_cancelamento FROM newsletter_subscritores WHERE ativo=true')).rows;let enviados=0,falhas=0;const mail=require('../integrations/email');const base=(process.env.BACKEND_PUBLIC_URL||'').replace(/\/$/,'');
+ for(const sub of subs){try{const url=`${base}/api/operacoes/newsletter/cancelar/${sub.token_cancelamento}`;await mail.enviarCampanha({to:sub.email,assunto:c.assunto,conteudo:c.conteudo,unsubscribeUrl:url});enviados++;}catch(e){falhas++;console.error('[newsletter]',sub.id,e.message)}}
+ await query(`UPDATE newsletter_campanhas SET estado='enviada',enviados=$1,falhas=$2,enviada_em=now(),atualizado_em=now() WHERE id=$3`,[enviados,falhas,c.id]);res.json({sucesso:true,enviados,falhas,total:subs.length});
+}catch(e){next(e)}});
+router.get('/admin/relatorios/vendas',admin,async(req,res,next)=>{try{
+ const desde=String(req.query.desde||'').slice(0,10),ate=String(req.query.ate||'').slice(0,10);const params=[];let filtro="pp.estado='pago'";if(desde){params.push(desde);filtro+=` AND p.criado_em >= $${params.length}::date`}if(ate){params.push(ate);filtro+=` AND p.criado_em < ($${params.length}::date + interval '1 day')`}
+ const resumo=await query(`SELECT COUNT(*)::int encomendas,COALESCE(SUM(p.total_eur),0)::numeric receita_eur,COALESCE(AVG(p.total_eur),0)::numeric ticket_medio_eur FROM pedidos p JOIN pedido_pagamentos pp ON pp.pedido_id=p.id WHERE ${filtro}`,params);
+ const dias=await query(`SELECT date_trunc('day',p.criado_em)::date dia,COUNT(*)::int encomendas,COALESCE(SUM(p.total_eur),0)::numeric receita_eur FROM pedidos p JOIN pedido_pagamentos pp ON pp.pedido_id=p.id WHERE ${filtro} GROUP BY 1 ORDER BY 1`,params);
+ const top=await query(`SELECT pi.nome_produto,SUM(pi.quantidade)::int unidades,COALESCE(SUM(pi.quantidade*pi.preco_unitario_eur),0)::numeric vendas_eur FROM pedido_itens pi JOIN pedidos p ON p.id=pi.pedido_id JOIN pedido_pagamentos pp ON pp.pedido_id=p.id WHERE ${filtro} GROUP BY pi.nome_produto ORDER BY vendas_eur DESC LIMIT 20`,params);
+ res.json({resumo:resumo.rows[0],porDia:dias.rows,produtosMaisVendidos:top.rows});
+}catch(e){next(e)}});
+
 router.get('/admin/assinaturas',admin,async(req,res,next)=>{try{const r=await query('SELECT * FROM assinaturas ORDER BY criado_em DESC');res.json(r.rows)}catch(e){next(e)}});
+
+
+// Kits/combos: catalogue CRUD. Bundled checkout remains disabled until the order schema supports atomic kit pricing.
+router.get('/kits',async(req,res,next)=>{if(String(process.env.KITS_ATIVOS||'false').toLowerCase()!=='true')return res.status(404).json({erro:'Os kits não estão disponíveis para compra neste momento.'});try{const r=await query(`SELECT k.id,k.nome,k.slug,k.descricao,k.imagem_url,k.preco_eur,COALESCE(json_agg(json_build_object('produtoId',p.id,'nome',p.nome,'quantidade',ki.quantidade,'imagem',(SELECT pi.url FROM produto_imagens pi WHERE pi.produto_id=p.id ORDER BY pi.principal DESC,pi.ordem LIMIT 1),'precoEUR',p.preco_venda_eur) ORDER BY p.nome) FILTER(WHERE p.id IS NOT NULL),'[]') itens FROM kits k LEFT JOIN kit_itens ki ON ki.kit_id=k.id LEFT JOIN produtos p ON p.id=ki.produto_id AND p.ativo=true WHERE k.ativo=true GROUP BY k.id ORDER BY k.criado_em DESC`);res.json(r.rows)}catch(e){next(e)}});
+router.post('/admin/kits',admin,async(req,res,next)=>{try{const nome=String(req.body.nome||'').trim(),descricao=String(req.body.descricao||'').trim(),imagem=String(req.body.imagemUrl||'').trim(),preco=Number(req.body.precoEUR),produtos=Array.isArray(req.body.produtos)?req.body.produtos:[];if(!nome||nome.length>180||!Number.isFinite(preco)||preco<=0||!produtos.length)return res.status(400).json({erro:'Nome, preço positivo e pelo menos um produto são obrigatórios.'});if(imagem&&!/^https:\/\//i.test(imagem))return res.status(400).json({erro:'A imagem deve usar HTTPS.'});const slugBase=slugify(nome)||'kit';const slug=slugBase+'-'+Date.now().toString(36);const result=await transaction(async c=>{const k=(await c.query('INSERT INTO kits(nome,slug,descricao,imagem_url,preco_eur) VALUES($1,$2,$3,$4,$5) RETURNING *',[nome,slug,descricao||null,imagem||null,preco])).rows[0];for(const item of produtos){const id=Number(item.produtoId),q=Number(item.quantidade||1);if(!Number.isInteger(id)||id<1||!Number.isInteger(q)||q<1||q>50)throw new Error('Produto ou quantidade inválidos no kit.');const p=await c.query('SELECT id FROM produtos WHERE id=$1 AND ativo=true',[id]);if(!p.rowCount)throw new Error(`Produto ${id} não encontrado ou inativo.`);await c.query('INSERT INTO kit_itens(kit_id,produto_id,quantidade) VALUES($1,$2,$3)',[k.id,id,q]);}return k});res.status(201).json(result)}catch(e){if(e.code==='23505')return res.status(409).json({erro:'Já existe um kit com estes dados.'});next(e)}});
+router.put('/admin/kits/:id/estado',admin,async(req,res,next)=>{try{const ativo=!!req.body.ativo;const r=await query('UPDATE kits SET ativo=$1,atualizado_em=now() WHERE id=$2 RETURNING *',[ativo,req.params.id]);if(!r.rowCount)return res.status(404).json({erro:'Kit não encontrado.'});res.json(r.rows[0])}catch(e){next(e)}});
+router.delete('/admin/kits/:id',admin,async(req,res,next)=>{try{const r=await query('DELETE FROM kits WHERE id=$1 RETURNING id',[req.params.id]);if(!r.rowCount)return res.status(404).json({erro:'Kit não encontrado.'});res.json({sucesso:true})}catch(e){next(e)}});
 
 module.exports=router;
