@@ -87,7 +87,7 @@ function validarAmbiente(env = process.env, opcoes = {}) {
 
 function validarLancamento(env = process.env) {
  const base=validarAmbiente(env,{lancamento:true});
- const required=['RESEND_API_KEY','EMAIL_FROM','EMAIL_REPLY_TO','STORE_ORDER_NOTIFICATION_EMAIL','PAGAMENTO_METODOS_ATIVOS','PAGAMENTO_PRAZO_HORAS','CJ_API_KEY','PAISES_COM_ENVIO_DIRETO','EMPRESA_DENOMINACAO','EMPRESA_NIF','EMPRESA_MORADA','EMPRESA_EMAIL','EMPRESA_TELEFONE','EMPRESA_REPRESENTANTE','EMPRESA_HORARIO','EMPRESA_LIVRO_RECLAMACOES','EMPRESA_IVA'];
+ const required=['PAGAMENTO_METODOS_ATIVOS','PAGAMENTO_PRAZO_HORAS','CJ_API_KEY','PAISES_COM_ENVIO_DIRETO','EMPRESA_DENOMINACAO','EMPRESA_NIF','EMPRESA_MORADA','EMPRESA_EMAIL','EMPRESA_TELEFONE','EMPRESA_REPRESENTANTE','EMPRESA_HORARIO','EMPRESA_LIVRO_RECLAMACOES','EMPRESA_IVA'];
  const extra=required.filter(k=>!String(env[k]||'').trim()).map(k=>`Variável obrigatória para lançamento em falta: ${k}`);
  if(String(env.LUMINA_LEGAL_VALIDADO||'').toLowerCase()!=='true')extra.push('LUMINA_LEGAL_VALIDADO tem de ser true após validação jurídica e contabilística do titular.');
  return {ok:base.ok&&extra.length===0,erros:[...base.erros,...extra]};

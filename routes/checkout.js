@@ -89,8 +89,8 @@ router.post('/',rateLimitPersistente({nome:'checkout-criar-pedido',limite:10,jan
   const metodo=String(metodoPagamento||'').trim().toLowerCase();
   const metodoVars={transferencia:['PAGAMENTO_TITULAR','PAGAMENTO_BANCO','PAGAMENTO_IBAN','PAGAMENTO_PRAZO_HORAS'],deposito:['PAGAMENTO_TITULAR','PAGAMENTO_BANCO','PAGAMENTO_PRAZO_HORAS'],multicaixa:['PAGAMENTO_MULTICAIXA_ENTIDADE','PAGAMENTO_MULTICAIXA_TELEFONE','PAGAMENTO_PRAZO_HORAS']};
   const ativos=String(process.env.PAGAMENTO_METODOS_ATIVOS||'').split(',').map(x=>x.trim().toLowerCase());
-  const depsPagamento=['SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY','SUPABASE_COMPROVATIVOS_BUCKET','RESEND_API_KEY','EMAIL_FROM','EMAIL_REPLY_TO','STORE_ORDER_NOTIFICATION_EMAIL'];
-  if(depsPagamento.some(k=>!String(process.env[k]||'').trim()))return res.status(503).json({erro:'O pagamento manual está temporariamente indisponível até a loja concluir a configuração segura de comprovativos e e-mail.'});
+  const depsPagamento=['SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY','SUPABASE_COMPROVATIVOS_BUCKET'];
+  if(depsPagamento.some(k=>!String(process.env[k]||'').trim()))return res.status(503).json({erro:'O pagamento manual está temporariamente indisponível até a loja concluir a configuração segura de comprovativos.'});
   if(!metodoVars[metodo]||!ativos.includes(metodo)||metodoVars[metodo].some(k=>!String(process.env[k]||'').trim())||(metodo==='transferencia'&&!validarIBAN(process.env.PAGAMENTO_IBAN)))return res.status(503).json({erro:'Os métodos de pagamento ainda não estão configurados para este checkout. Contacte a loja mais tarde.'});
   if(!Array.isArray(itens)||!itens.length)return res.status(400).json({erro:'Carrinho vazio.'});
   const nomeCliente=String(nome||'').trim(),emailCliente=String(email||'').trim().toLowerCase();

@@ -11,7 +11,7 @@ const ok = m => out.push('  OK    ' + m);
 const mau = m => out.push('  FALTA ' + m);
 
 out.push('\n[PAGAMENTO POR TRANSFERÊNCIA]');
-const deps = ['SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY','SUPABASE_COMPROVATIVOS_BUCKET','RESEND_API_KEY','EMAIL_FROM','EMAIL_REPLY_TO','STORE_ORDER_NOTIFICATION_EMAIL'];
+const deps = ['SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY','SUPABASE_COMPROVATIVOS_BUCKET'];
 for (const k of deps) vazias(k) ? mau(k + ' (sem ela a loja esconde TODOS os métodos de pagamento)') : ok(k);
 const metodos = String(process.env.PAGAMENTO_METODOS_ATIVOS || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
 metodos.includes('transferencia') ? ok('PAGAMENTO_METODOS_ATIVOS contém "transferencia"') : mau('PAGAMENTO_METODOS_ATIVOS deve conter: transferencia');
