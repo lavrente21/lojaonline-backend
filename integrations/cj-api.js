@@ -1,12 +1,21 @@
-const BASE='https://developers.cjdropshipping.com/api2.0/v1'; let tokenCache=null;
+const BASE='https://developers.cjdropshipping.com/api2.0/v1'; let tokenCache=null,tokenPromise=null;
+// A CJ limita a 1 pedido/segundo: fila global com espaçamento mínimo e novas tentativas em 429.
+let filaCJ=Promise.resolve(),ultimoCJ=0;
+const MIN_INTERVALO_MS=Number(process.env.CJ_MIN_INTERVALO_MS||1200);
+function limitado(fn){const run=filaCJ.then(async()=>{const espera=ultimoCJ+MIN_INTERVALO_MS-Date.now();if(espera>0)await new Promise(r=>setTimeout(r,espera));try{return await fn();}finally{ultimoCJ=Date.now();}});filaCJ=run.catch(()=>{});return run;}
+const eLimite=(status,msg)=>status===429||/too many requests|qps limit/i.test(String(msg||''));
 async function getToken(){
  if(tokenCache?.expires>Date.now()+86400000)return tokenCache.value;
+ if(!tokenPromise)tokenPromise=obterToken().finally(()=>{tokenPromise=null;});
+ return tokenPromise;
+}
+async function obterToken(){
+ if(tokenCache?.expires>Date.now()+86400000)return tokenCache.value;
  if(!process.env.CJ_API_KEY) throw new Error('CJ_API_KEY não configurada.');
- const r=await fetch(`${BASE}/authentication/getAccessToken`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apiKey:process.env.CJ_API_KEY})});
- const d=await r.json(); if(!r.ok||!d.result) throw new Error(d.message||'Falha na autenticação CJ.');
+ let d;for(let t=0;t<4;t++){const r=await limitado(()=>fetch(`${BASE}/authentication/getAccessToken`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apiKey:process.env.CJ_API_KEY})}));d=await r.json().catch(()=>({}));if(eLimite(r.status,d.message)&&t<3){await new Promise(x=>setTimeout(x,2000*(t+1)));continue;}if(!r.ok||!d.result) throw new Error(d.message||'Falha na autenticação CJ.');break;}
  tokenCache={value:d.data.accessToken,expires:Date.now()+Math.min(170,Number(process.env.CJ_TOKEN_CACHE_DAYS||170))*86400000}; return tokenCache.value;
 }
-async function req(path,opts={}){const t=await getToken(); const r=await fetch(BASE+path,{...opts,headers:{'CJ-Access-Token':t,'Content-Type':'application/json',...(opts.headers||{})}}); const d=await r.json().catch(()=>({})); if(!r.ok||d.result===false) throw new Error(d.message||`CJ respondeu ${r.status}.`); return d;}
+async function req(path,opts={}){const t=await getToken();for(let tentativa=0;;tentativa++){const r=await limitado(()=>fetch(BASE+path,{...opts,headers:{'CJ-Access-Token':t,'Content-Type':'application/json',...(opts.headers||{})}}));const d=await r.json().catch(()=>({}));if(eLimite(r.status,d.message)&&tentativa<4){await new Promise(x=>setTimeout(x,1500*(tentativa+1)));continue;}if(!r.ok||d.result===false)throw new Error(d.message||`CJ respondeu ${r.status}.`);return d;}}
 async function criarPedido({pedidoId,itens,moradaEntrega,logisticName,origem:origemParam}){
  const origem=String(origemParam||process.env.CJ_FROM_COUNTRY_CODE||'').trim().toUpperCase();const logistica=String(logisticName||process.env.CJ_LOGISTIC_NAME||'').trim();if(!origem)throw new Error('CJ_FROM_COUNTRY_CODE não configurado; envio bloqueado.');if(!logistica)throw new Error('CJ_LOGISTIC_NAME não configurado; envio bloqueado.');if(!moradaEntrega.nome||!moradaEntrega.pais||!moradaEntrega.cidade||!moradaEntrega.linha1||!moradaEntrega.telefone)throw new Error('Morada de expedição incompleta; envio bloqueado.');if(itens.some(i=>!i.idFornecedorVariante||!Number.isInteger(Number(i.quantidade))||Number(i.quantidade)<1))throw new Error('Variant ID ou quantidade inválida; envio bloqueado.');
  const body={orderNumber:String(pedidoId),shippingZip:moradaEntrega.codigoPostal||'',shippingCountryCode:moradaEntrega.pais,shippingCountry:moradaEntrega.pais,shippingProvince:moradaEntrega.provincia||'',shippingCity:moradaEntrega.cidade,shippingAddress:moradaEntrega.linha1,shippingCustomerName:moradaEntrega.nome,email:moradaEntrega.email||'',shippingPhone:moradaEntrega.telefone,payType:3,logisticName:logistica,fromCountryCode:origem,platform:'Api',shopLogisticsType:2,orderFlow:1,products:itens.map(i=>({vid:i.idFornecedorVariante,quantity:i.quantidade,storeLineItemId:String(i.produtoId)}))};
