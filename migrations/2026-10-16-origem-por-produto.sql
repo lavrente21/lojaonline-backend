@@ -1,2 +1,3 @@
 -- País de origem (armazém do fornecedor) por produto. Código ISO de 2 letras: CN, US, DE, ...
 ALTER TABLE produtos ADD COLUMN IF NOT EXISTS pais_origem VARCHAR(2);
+ALTER TABLE pedido_fornecedores ADD COLUMN IF NOT EXISTS erro_envio_msg VARCHAR(300);
