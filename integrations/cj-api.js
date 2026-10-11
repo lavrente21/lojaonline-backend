@@ -46,7 +46,17 @@ async function consultarProduto(idOuLink){
   linkFornecedor:(/^https?:\/\//i.test(String(idOuLink||''))?String(idOuLink).trim():null), dados:x
  };
 }
-async function consultarEstoque(idProdutoFornecedor){const d=await req(`/product/stock/queryByVid?vid=${encodeURIComponent(idProdutoFornecedor)}`);return{idProdutoFornecedor,stock:Number(d.data?.stock??0),dados:d.data};}
+async function consultarEstoque(idProdutoFornecedor,{origem}={}){
+ const d=await req(`/product/stock/queryByVid?vid=${encodeURIComponent(idProdutoFornecedor)}`);
+ const linhas=Array.isArray(d.data)?d.data:(d.data&&typeof d.data==='object'?[d.data]:[]);
+ const alvo=origem?String(origem).trim().toUpperCase():'';
+ const num=v=>(v===undefined||v===null||v==='')?null:Number(v);
+ const quantidade=l=>{const t=num(l.totalInventory??l.storageNum??l.stock);if(t!==null&&Number.isFinite(t))return t;const a=num(l.cjInventoryNum??l.cjInventory),b=num(l.factoryInventoryNum??l.factoryInventory);return(a===null&&b===null)?null:(a||0)+(b||0);};
+ const uteis=(alvo&&linhas.some(l=>l.countryCode))?linhas.filter(l=>String(l.countryCode||'').toUpperCase()===alvo):linhas;
+ const reconhecido=linhas.length===0||linhas.some(l=>quantidade(l)!==null);
+ const stock=uteis.reduce((s,l)=>s+(quantidade(l)||0),0);
+ return{idProdutoFornecedor,stock,reconhecido,origem:alvo||null,dados:d.data};
+}
 async function consultarRastreio(idPedidoFornecedor){const d=await req(`/logistic/trackInfo?orderId=${encodeURIComponent(idPedidoFornecedor)}`);const data=d.data||{};return{idPedidoFornecedor,codigoRastreio:data.trackNumber||data.trackingNumber||null,estado:data.status||null,dados:data};}
 
 async function calcularFrete({destino, produtos, zip, taxId, origem}){

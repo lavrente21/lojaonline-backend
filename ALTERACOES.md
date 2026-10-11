@@ -9,3 +9,7 @@
 - Checkout devolve rotaEnvio e mensagem de pagamento.
 - Angola continua bloqueada até configurar o agente de carga (AGENTE_*).
 - Base de dados: correr `npm run migrate` numa BD nova. Para uma BD já existente, executar só a secção "11. PAGAMENTO MANUAL" do schema.sql.
+
+## Correção stock CJ (envio automático)
+- `consultarEstoque` agora lê a lista de armazéns da CJ (`totalInventory` por `countryCode`), filtra pela origem do artigo e sinaliza resposta não reconhecida.
+- O envio distingue "stock insuficiente" (com quantidades e origem) de "resposta de stock não reconhecida" e regista a resposta crua nos logs.
