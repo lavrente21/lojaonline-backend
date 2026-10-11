@@ -37,7 +37,7 @@ async function carregarItens(itens){
     const preco=precoBase+(variante?Number(variante.preco_extra_eur||0):0);
     if(!Number.isFinite(preco)||preco<=0){const e=new Error(`Preço inválido para ${p.nome}.`);e.status=409;throw e;}
     totalEUR+=preco*i.quantidade;
-    resolvidos.push({produtoId:i.produtoId,nomeProduto:p.nome,fornecedor:p.fornecedor,quantidade:i.quantidade,preco,idFornecedor:p.id_fornecedor,skuFornecedor:p.sku_fornecedor,idVariante:variante?Number(variante.id):null,idFornecedorVariante:vid||null});
+    resolvidos.push({produtoId:i.produtoId,nomeProduto:p.nome,fornecedor:p.fornecedor,quantidade:i.quantidade,preco,idFornecedor:p.id_fornecedor,skuFornecedor:p.sku_fornecedor,paisOrigem:p.pais_origem||null,idVariante:variante?Number(variante.id):null,idFornecedorVariante:vid||null});
   }
   return{totalEUR,resolvidos,produtosCJ};
 }
@@ -58,9 +58,11 @@ router.post('/quote',rateLimitPersistente({nome:'checkout-quote',limite:20,janel
     try{
       let metodos=[];
       if(fornecedor==='cj'){
-        const products=rows.map(i=>({vid:i.idFornecedorVariante,quantity:i.quantidade}));
-        if(products.some(x=>!x.vid))throw new Error('Falta Variant ID real da CJ em pelo menos um produto.');
-        metodos=await require('../integrations/cj-api').calcularFrete({destino:destinoFornecedor,zip:rota.morada.codigoPostal||codigoPostal,produtos:products});
+        if(rows.some(i=>!i.idFornecedorVariante))throw new Error('Falta Variant ID real da CJ em pelo menos um produto.');
+        const porOrigem={};for(const i of rows){const o=String(i.paisOrigem||process.env.CJ_FROM_COUNTRY_CODE||'').toUpperCase();if(!o)throw new Error(`Defina o país de origem do produto ${i.nomeProduto||i.produtoId} no admin.`);(porOrigem[o]=porOrigem[o]||[]).push({vid:i.idFornecedorVariante,quantity:i.quantidade});}
+        const cjApi=require('../integrations/cj-api');const origens=Object.keys(porOrigem);let totalUSD=0,prazo=null;
+        for(const o of origens){const ms=await cjApi.calcularFrete({destino:destinoFornecedor,zip:rota.morada.codigoPostal||codigoPostal,produtos:porOrigem[o],origem:o});if(!ms.length)throw new Error(`Sem métodos de envio da origem ${o} para ${destinoFornecedor}.`);const m=ms.reduce((a,b)=>b.totalUSD<a.totalUSD?b:a);totalUSD+=m.totalUSD;prazo=prazo||m.prazo;}
+        metodos=[{nome:origens.length>1?`CJ (${origens.length} origens: ${origens.join(', ')})`:'CJ Dropshipping',totalUSD:Number(totalUSD.toFixed(2)),prazo}];
       } else if(fornecedor==='buckydrop'){
         const products=rows.map(i=>({sku:i.skuFornecedor||i.idFornecedor,quantity:i.quantidade}));
         if(products.some(x=>!x.sku))throw new Error('Falta SKU/ID de fornecedor BuckyDrop.');

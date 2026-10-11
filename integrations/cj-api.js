@@ -7,8 +7,8 @@ async function getToken(){
  tokenCache={value:d.data.accessToken,expires:Date.now()+Math.min(170,Number(process.env.CJ_TOKEN_CACHE_DAYS||170))*86400000}; return tokenCache.value;
 }
 async function req(path,opts={}){const t=await getToken(); const r=await fetch(BASE+path,{...opts,headers:{'CJ-Access-Token':t,'Content-Type':'application/json',...(opts.headers||{})}}); const d=await r.json().catch(()=>({})); if(!r.ok||d.result===false) throw new Error(d.message||`CJ respondeu ${r.status}.`); return d;}
-async function criarPedido({pedidoId,itens,moradaEntrega,logisticName}){
- const origem=String(process.env.CJ_FROM_COUNTRY_CODE||'').trim();const logistica=String(logisticName||process.env.CJ_LOGISTIC_NAME||'').trim();if(!origem)throw new Error('CJ_FROM_COUNTRY_CODE não configurado; envio bloqueado.');if(!logistica)throw new Error('CJ_LOGISTIC_NAME não configurado; envio bloqueado.');if(!moradaEntrega.nome||!moradaEntrega.pais||!moradaEntrega.cidade||!moradaEntrega.linha1||!moradaEntrega.telefone)throw new Error('Morada de expedição incompleta; envio bloqueado.');if(itens.some(i=>!i.idFornecedorVariante||!Number.isInteger(Number(i.quantidade))||Number(i.quantidade)<1))throw new Error('Variant ID ou quantidade inválida; envio bloqueado.');
+async function criarPedido({pedidoId,itens,moradaEntrega,logisticName,origem:origemParam}){
+ const origem=String(origemParam||process.env.CJ_FROM_COUNTRY_CODE||'').trim().toUpperCase();const logistica=String(logisticName||process.env.CJ_LOGISTIC_NAME||'').trim();if(!origem)throw new Error('CJ_FROM_COUNTRY_CODE não configurado; envio bloqueado.');if(!logistica)throw new Error('CJ_LOGISTIC_NAME não configurado; envio bloqueado.');if(!moradaEntrega.nome||!moradaEntrega.pais||!moradaEntrega.cidade||!moradaEntrega.linha1||!moradaEntrega.telefone)throw new Error('Morada de expedição incompleta; envio bloqueado.');if(itens.some(i=>!i.idFornecedorVariante||!Number.isInteger(Number(i.quantidade))||Number(i.quantidade)<1))throw new Error('Variant ID ou quantidade inválida; envio bloqueado.');
  const body={orderNumber:String(pedidoId),shippingZip:moradaEntrega.codigoPostal||'',shippingCountryCode:moradaEntrega.pais,shippingCountry:moradaEntrega.pais,shippingProvince:moradaEntrega.provincia||'',shippingCity:moradaEntrega.cidade,shippingAddress:moradaEntrega.linha1,shippingCustomerName:moradaEntrega.nome,email:moradaEntrega.email||'',shippingPhone:moradaEntrega.telefone,payType:3,logisticName:logistica,fromCountryCode:origem,platform:'Api',shopLogisticsType:2,orderFlow:1,products:itens.map(i=>({vid:i.idFornecedorVariante,quantity:i.quantidade,storeLineItemId:String(i.produtoId)}))};
  const d=await req('/shopping/order/createOrderV3',{method:'POST',body:JSON.stringify(body)}); const data=d.data||{}; return {idPedidoFornecedor:data.orderId||data.cjOrderId||data.orderNum,prazoEstimadoDias:null,dados:data};
 }
@@ -40,8 +40,8 @@ async function consultarProduto(idOuLink){
 async function consultarEstoque(idProdutoFornecedor){const d=await req(`/product/stock/queryByVid?vid=${encodeURIComponent(idProdutoFornecedor)}`);return{idProdutoFornecedor,stock:Number(d.data?.stock??0),dados:d.data};}
 async function consultarRastreio(idPedidoFornecedor){const d=await req(`/logistic/trackInfo?orderId=${encodeURIComponent(idPedidoFornecedor)}`);const data=d.data||{};return{idPedidoFornecedor,codigoRastreio:data.trackNumber||data.trackingNumber||null,estado:data.status||null,dados:data};}
 
-async function calcularFrete({destino, produtos, zip, taxId}){
- const start=String(process.env.CJ_FROM_COUNTRY_CODE||'').trim();if(!start)throw new Error('CJ_FROM_COUNTRY_CODE não configurado; cotação bloqueada.');
+async function calcularFrete({destino, produtos, zip, taxId, origem}){
+ const start=String(origem||process.env.CJ_FROM_COUNTRY_CODE||'').trim().toUpperCase();if(!start)throw new Error('País de origem do produto não definido (campo país de origem no admin); cotação bloqueada.');
  const payload={startCountryCode:start,endCountryCode:String(destino).toUpperCase(),zip:zip||undefined,taxId:taxId||undefined,products:produtos.map(p=>({quantity:Number(p.quantity)||1,vid:String(p.vid)}))};
  const d=await req('/logistic/freightCalculate',{method:'POST',body:JSON.stringify(payload)});
  const rows=Array.isArray(d.data)?d.data:(Array.isArray(d.data?.freightTrialList)?d.data.freightTrialList:[]);
