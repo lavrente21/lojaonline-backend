@@ -19,6 +19,15 @@ async function req(path,opts={}){const t=await getToken();for(let tentativa=0;;t
 async function criarPedido({pedidoId,itens,moradaEntrega,logisticName,origem:origemParam}){
  const origem=String(origemParam||process.env.CJ_FROM_COUNTRY_CODE||'').trim().toUpperCase();const logistica=String(logisticName||process.env.CJ_LOGISTIC_NAME||'').trim();if(!origem)throw new Error('CJ_FROM_COUNTRY_CODE não configurado; envio bloqueado.');if(!logistica)throw new Error('CJ_LOGISTIC_NAME não configurado; envio bloqueado.');if(!moradaEntrega.nome||!moradaEntrega.pais||!moradaEntrega.cidade||!moradaEntrega.linha1||!moradaEntrega.telefone)throw new Error('Morada de expedição incompleta; envio bloqueado.');if(itens.some(i=>!i.idFornecedorVariante||!Number.isInteger(Number(i.quantidade))||Number(i.quantidade)<1))throw new Error('Variant ID ou quantidade inválida; envio bloqueado.');
  const body={orderNumber:String(pedidoId),shippingZip:moradaEntrega.codigoPostal||'',shippingCountryCode:moradaEntrega.pais,shippingCountry:moradaEntrega.pais,shippingProvince:moradaEntrega.provincia||'',shippingCity:moradaEntrega.cidade,shippingAddress:moradaEntrega.linha1,shippingCustomerName:moradaEntrega.nome,email:moradaEntrega.email||'',shippingPhone:moradaEntrega.telefone,payType:3,logisticName:logistica,fromCountryCode:origem,platform:'Api',shopLogisticsType:2,orderFlow:1,products:itens.map(i=>({vid:i.idFornecedorVariante,quantity:i.quantidade,storeLineItemId:String(i.produtoId)}))};
+ const UE=new Set(['AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE']);
+ if(UE.has(String(moradaEntrega.pais||'').trim().toUpperCase())){
+  // IOSS (IVA em importações até 150 EUR): 1=sem IOSS (cliente paga IVA), 2=IOSS próprio, 3=IOSS da CJ.
+  const t=String(process.env.CJ_IOSS_TYPE||'3').trim();
+  if(!['1','2','3'].includes(t))throw new Error('CJ_IOSS_TYPE inválido (use 1, 2 ou 3); envio bloqueado.');
+  body.iossType=Number(t);
+  if(t==='3')body.iossNumber='CJ-IOSS';
+  else if(t==='2'){const n=String(process.env.CJ_IOSS_NUMBER||'').trim();if(!n)throw new Error('CJ_IOSS_NUMBER não configurado (CJ_IOSS_TYPE=2); envio bloqueado.');body.iossNumber=n;}
+ }
  const d=await req('/shopping/order/createOrderV3',{method:'POST',body:JSON.stringify(body)}); const data=d.data||{}; return {idPedidoFornecedor:data.orderId||data.cjOrderId||data.orderNum,prazoEstimadoDias:null,dados:data};
 }
 function extrairIdProduto(valor){

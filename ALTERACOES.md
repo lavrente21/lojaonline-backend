@@ -13,3 +13,7 @@
 ## Correção stock CJ (envio automático)
 - `consultarEstoque` agora lê a lista de armazéns da CJ (`totalInventory` por `countryCode`), filtra pela origem do artigo e sinaliza resposta não reconhecida.
 - O envio distingue "stock insuficiente" (com quantidades e origem) de "resposta de stock não reconhecida" e regista a resposta crua nos logs.
+
+## IOSS (destinos UE) no envio à CJ
+- `criarPedido` envia `iossType`/`iossNumber` quando o destino é da UE. Variáveis: `CJ_IOSS_TYPE` (1=sem IOSS, 2=IOSS próprio, 3=IOSS da CJ; omissão 3) e `CJ_IOSS_NUMBER` (obrigatório se tipo 2).
+- Tipo 3 não se aplica a encomendas acima de 150 EUR (o cliente paga o IVA).
